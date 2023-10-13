@@ -1,3 +1,8 @@
+*.ipynb
+.ipynb_checkpoints/
+data/
+*.gif
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
