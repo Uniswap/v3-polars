@@ -2,6 +2,7 @@ from .helpers import *
 import polars as pl
 from google.cloud import bigquery
 
+from datetime import date, timedelta, datetime, timezone
 
 class v3Pool:
     def __init__(
@@ -51,6 +52,19 @@ class v3Pool:
         if update:
             self.update_tables()
 
+            if self.chain == "optimism":
+                print("Chain = optimism - Start pulling the ovm1")
+                # the ovm1 = optimism, but they are in seperate databases
+                # pain
+                try:
+                    self.chain = "optimism_legacy_ovm1"
+                    self.update_tables()
+                except Exception as e:
+                    raise (e)
+                # we dont want these race condition
+                finally:
+                    self.chain = "optimism"
+
         if initialize:
             self.ts, self.fee, self.token0, self.token1 = initializePoolFromFactory(
                 pool, self.chain, self.data_path
@@ -83,6 +97,7 @@ class v3Pool:
                 print(f"Found data")
                 found_min_block_of_segment = (
                     pl.scan_parquet(f"{self.path}/{data_type}/*.parquet")
+                    .filter(pl.col("chain_name") == self.chain)
                     .select("block_number")
                     .max()
                     .collect()
@@ -129,6 +144,53 @@ class v3Pool:
                     min_block_of_segment,
                 )
 
+                # we need the ovm1 state for the current optimism
+                # so we read that state in and then we dump it as it happened
+                # in the genesis block
+                if self.chain == "optimism_legacy_ovm1":
+                    # back fill and block_timestamp, block_number, and chain
+                    mapping = readOVM("data", "mappings")
+
+                    df = (
+                        df.with_columns(
+                            block_number=1,
+                            # https://optimistic.etherscan.io/block/1
+                            block_timestamp=datetime(
+                                year=2021,
+                                month=11,
+                                day=11,
+                                hour=21,
+                                minute=16,
+                                second=39,
+                                tzinfo=timezone.utc,
+                            ),
+                            chain_name=pl.lit("optimism"),
+                        )
+                        # it defaults to int32 and we want 64
+                        .cast({"block_number": pl.Int64})
+                    )
+
+                    if data_type in [
+                        "pool_swap_events",
+                        "pool_mint_burn_events",
+                        "pool_initialize_events",
+                    ]:
+                        df = df.with_columns(
+                            # ovm changed contract addresses from ovm1 to ovm2
+                            # we map this back for us
+                            address=pl.col("address").map_dict(mapping, default=None)
+                        )
+
+                    elif data_type in ["factory_pool_created"]:
+                        df = df.with_columns(
+                            # ovm changed contract addresses from ovm1 to ovm2
+                            # we map this back for us
+                            pool=pl.col("pool").map_dict(mapping, default=None)
+                        )
+
+                    # we index the optimism chain by backloading all the ovm1 data as optimism at block 0
+                    writeDataset(df, data_type, self.data_path, 0, 0)
+
                 # this moves the iteration, we pulled all of block n, so we want to start at n+1
                 min_block_of_segment = max_block_of_segment + 1
 
@@ -163,15 +225,14 @@ class v3Pool:
             if self.low_memory or pull:
                 return (
                     pl.scan_parquet(f"{data_path}/{data}/*.parquet")
-                    .filter((pl.col("address") == self.pool))
-                    .cast(
-                        {
-                            "amount": pl.Float64,
+                    .filter(
+                        (pl.col("address") == self.pool)
+                        & (pl.col("chain_name") == self.chain)
+                    )
+                    .cast({"amount": pl.Float64,
                             "tick_lower": pl.Int64,
                             "tick_upper": pl.Int64,
-                            "type_of_event": pl.Float64,
-                        }
-                    )
+                            "type_of_event": pl.Float64})
                     .collect()
                     .sort("block_number")
                 )
@@ -182,7 +243,7 @@ class v3Pool:
                 return self.cache["mb"]
 
     def calcSwapDF(self, as_of):
-        as_of, df, inRangeValues = createSwapDF(as_of, self)
+        as_of, df, inRangeValues = createSwapDF(as_of, pool)
 
         self.cache["as_of"] = as_of
         self.cache["swapDF"] = df

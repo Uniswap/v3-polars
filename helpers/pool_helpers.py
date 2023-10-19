@@ -76,3 +76,16 @@ def createSwapDF(as_of, pool):
             tick,
         ),
     )
+
+
+def readOVM(path, data_type):
+    mappings = {
+        old: new
+        for old, new in (
+            pl.read_csv(f"{path}/{data_type}/ovm_mapping.csv")
+            .select(["oldaddress", "newaddress"])
+            .iter_rows()
+        )
+    }
+
+    return mappings
