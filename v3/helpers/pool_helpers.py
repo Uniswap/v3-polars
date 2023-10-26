@@ -2,6 +2,7 @@
 from .swap_math import *
 import polars as pl
 
+from datetime import date, timedelta, datetime, timezone
 
 def initializePoolFromFactory(addr, chain, data_path):
     data_type = "factory_pool_created"
@@ -22,6 +23,21 @@ def initializePoolFromFactory(addr, chain, data_path):
 
     return ts, fee, token0, token1
 
+def ceil_dt(dt, delta):
+    return dt + (datetime.min - dt) % delta
+
+def dtToBN(dt, pool):
+    bn_as_of = (
+        pl.scan_parquet(f"{pool.data_path}/pool_swap_events/*.parquet")
+         .filter((pl.col('chain_name') == pool.chain) &
+                 (pl.col('block_timestamp') >= dt.replace(tzinfo = timezone.utc)))
+         .select(pl.col("block_number"))
+         .max()
+         .collect()
+         .item()
+        )
+    
+    return bn_as_of
 
 def createSwapDF(as_of, pool):
     price = pool.getPriceAt(as_of)
@@ -76,7 +92,43 @@ def createSwapDF(as_of, pool):
             tick,
         ),
     )
+def getPriceSeries(pool, start_time):
+    # precompute a dataframe that has the latest block number
+    bn_as_of = (
+        pl.scan_parquet(f"{pool.data_path}/pool_swap_events/*.parquet")
+        .filter((pl.col('chain_name') == pool.chain) &
+                (pl.col('block_timestamp') >= start_time.replace(tzinfo = timezone.utc)))
+        .select(['block_timestamp', 'block_number'])
+        .unique()
+        .sort('block_timestamp')
+        .group_by('block_timestamp')
+        .last()
+        .sort("block_timestamp")
+        .group_by_dynamic("block_timestamp", every = '6h')
+        .agg(pl.col('block_number').max())
+        .collect()
+        )
 
+    tick_as_of = (
+        pl.scan_parquet(f"{pool.data_path}/pool_swap_events/*.parquet")
+        .filter((pl.col('chain_name') == pool.chain) &
+                (pl.col('address') == pool.pool) &
+                (pl.col('block_timestamp') >= start_time.replace(tzinfo = timezone.utc)))
+        .select(['block_timestamp', 'tick'])
+        .unique()
+        .sort('block_timestamp')
+        .group_by('block_timestamp')
+        .last()
+        .sort("block_timestamp")
+        .cast({"tick": pl.Int64})
+        .group_by_dynamic("block_timestamp", every = '6h')
+        .agg(pl.col('tick').last())
+        .collect()
+        )
+
+    price = bn_as_of.join_asof(tick_as_of, on = 'block_timestamp')
+
+    return price
 
 def readOVM(path, data_type):
     mappings = {

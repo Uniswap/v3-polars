@@ -1,6 +1,5 @@
 from .swap_math import *
 
-
 def parseEntry(calldata, field, required=True):
     entry = calldata.get(field, None)
     assert entry != None or required, f"Missing {field}"

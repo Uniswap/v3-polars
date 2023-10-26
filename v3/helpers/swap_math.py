@@ -2,7 +2,6 @@ import numpy as np
 import math
 import polars as pl
 
-
 # math functions
 def priceX96ToTick(price):
     Q96 = 2**96

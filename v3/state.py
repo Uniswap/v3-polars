@@ -1,6 +1,8 @@
 from .helpers import *
 import polars as pl
 from google.cloud import bigquery
+from pathlib import Path
+PACKAGEDIR = Path(__file__).parent.absolute()
 
 from datetime import date, timedelta, datetime, timezone
 
@@ -39,8 +41,8 @@ class v3Pool:
         self.db = "on_chain_events"
 
         # data checkers
-        self.path = "data"
-        self.data_path = "data"
+        self.path = f"{PACKAGEDIR}/data"
+        self.data_path = f"{PACKAGEDIR}/data"
         checkPath("", self.data_path)
 
         self.tables = [
@@ -243,7 +245,7 @@ class v3Pool:
                 return self.cache["mb"]
 
     def calcSwapDF(self, as_of):
-        as_of, df, inRangeValues = createSwapDF(as_of, pool)
+        as_of, df, inRangeValues = createSwapDF(as_of, self)
 
         self.cache["as_of"] = as_of
         self.cache["swapDF"] = df
@@ -279,6 +281,18 @@ class v3Pool:
             return None
         else:
             return int(price)
+        
+    def getPriceSeries(self, as_of):
+        px = getPriceSeries(self, as_of)
+
+        return px
+    
+    def getBNAtDate(self, as_of):
+        return dtToBN(as_of, self)
+    
+    # bn, pool, data, data_path
+    def createLiq(self, as_of):
+        return createLiq(as_of, self, "pool_mint_burn_events", self.data_path)
 
     @property
     def getSwaps(self):
