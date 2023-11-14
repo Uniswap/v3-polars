@@ -1,6 +1,8 @@
 # data helpers
 from .swap_math import *
 import polars as pl
+import os
+import time
 
 from datetime import date, timedelta, datetime, timezone
 
@@ -48,9 +50,13 @@ def createSwapDF(as_of, pool):
 
     swap_df = (
         liq.filter(pl.col("liquidity") > 0)  # numerical error
+         .with_columns(tick_b = pl.col('tick').shift(-1),
+                       tick_a = pl.col('tick'))
+        .select(['liquidity', 'tick_a', 'tick_b'])
+        .fill_null((pool.MAX_TICK // pool.ts) * pool.ts)
         .with_columns(
-            p_a=(1.0001 ** pl.col("tick")) ** (1 / 2),
-            p_b=(1.0001 ** (pl.col("tick") + pool.ts)) ** (1 / 2),
+            p_a=(1.0001 ** pl.col("tick_a")) ** (1 / 2),
+            p_b=(1.0001 ** pl.col("tick_b")) ** (1 / 2),
         )
         .with_columns(
             yInTick=pl.col("liquidity") * (pl.col("p_b") - pl.col("p_a")),
@@ -59,18 +65,18 @@ def createSwapDF(as_of, pool):
         )
     )
 
-    current_tick = swap_df.filter(pl.col("tick") == tickFloor)
+    current_tick = swap_df.filter((pl.col("tick_a") <= tickFloor) &
+                                  ((pl.col("tick_b") > tickFloor)))
 
-    assert (
-        current_tick.shape[0] == 1
-    ), f"Missing/Duplicate in-range tick - Size of {current_tick.shape[0]}"
+    if (current_tick.shape[0] != 1):
+        raise ValueError(f"Missing/Duplicate in-range tick - Size of {current_tick.shape[0]}")
 
     sqrt_P = price / 2**96
     p_a, p_b, liquidity, tick = (
         current_tick["p_a"].item(),
         current_tick["p_b"].item(),
         current_tick["liquidity"].item(),
-        current_tick["tick"].item(),
+        current_tick["tick_a"].item(),
     )
 
     inRange0 = get_amount0_delta(p_a, sqrt_P, liquidity)
@@ -92,7 +98,7 @@ def createSwapDF(as_of, pool):
             tick,
         ),
     )
-def getPriceSeries(pool, start_time):
+def getPriceSeries(pool, start_time, frequency, gas = False):
     # precompute a dataframe that has the latest block number
     bn_as_of = (
         pl.scan_parquet(f"{pool.data_path}/pool_swap_events/*.parquet")
@@ -104,28 +110,47 @@ def getPriceSeries(pool, start_time):
         .group_by('block_timestamp')
         .last()
         .sort("block_timestamp")
-        .group_by_dynamic("block_timestamp", every = '6h')
+        .group_by_dynamic("block_timestamp", every = frequency)
         .agg(pl.col('block_number').max())
         .collect()
         )
 
-    tick_as_of = (
-        pl.scan_parquet(f"{pool.data_path}/pool_swap_events/*.parquet")
-        .filter((pl.col('chain_name') == pool.chain) &
-                (pl.col('address') == pool.pool) &
-                (pl.col('block_timestamp') >= start_time.replace(tzinfo = timezone.utc)))
-        .select(['block_timestamp', 'tick'])
-        .unique()
-        .sort('block_timestamp')
-        .group_by('block_timestamp')
-        .last()
-        .sort("block_timestamp")
-        .cast({"tick": pl.Int64})
-        .group_by_dynamic("block_timestamp", every = '6h')
-        .agg(pl.col('tick').last())
-        .collect()
-        )
-
+    if gas:
+        tick_as_of = (
+            pl.scan_parquet(f"{pool.data_path}/pool_swap_events/*.parquet")
+            .filter((pl.col('chain_name') == pool.chain) &
+                    (pl.col('address') == pool.pool) &
+                    (pl.col('block_timestamp') >= start_time.replace(tzinfo = timezone.utc)))
+            .select(['block_timestamp', 'tick', 'gas_price', 'gas_used'])
+            .unique()
+            .sort('block_timestamp')
+            .group_by('block_timestamp')
+            .last()
+            .sort("block_timestamp")
+            .cast({"tick": pl.Int64, 'gas_price': pl.UInt64, 'gas_used': pl.UInt64})
+            .group_by_dynamic("block_timestamp", every = frequency)
+            .agg([pl.col('tick').last().alias('tick'),
+                pl.col('gas_price').last().alias('gas_price'),
+                pl.col('gas_used').quantile(.5).alias("gas_used")])
+            .collect()
+            )
+    else:
+        tick_as_of = (
+            pl.scan_parquet(f"{pool.data_path}/pool_swap_events/*.parquet")
+            .filter((pl.col('chain_name') == pool.chain) &
+                    (pl.col('address') == pool.pool) &
+                    (pl.col('block_timestamp') >= start_time.replace(tzinfo = timezone.utc)))
+            .select(['block_timestamp', 'tick'])
+            .unique()
+            .sort('block_timestamp')
+            .group_by('block_timestamp')
+            .last()
+            .sort("block_timestamp")
+            .cast({"tick": pl.Int64})
+            .group_by_dynamic("block_timestamp", every = frequency)
+            .agg([pl.col('tick').last().alias('tick')])
+            .collect()
+            )
     price = bn_as_of.join_asof(tick_as_of, on = 'block_timestamp')
 
     return price
@@ -141,3 +166,31 @@ def readOVM(path, data_type):
     }
 
     return mappings
+
+
+def drop_tables(pool, tables):
+    # support both strings and lists
+    if type(tables) != list:
+        tables = [tables]
+
+    # a little footgun protection
+    print("Dropping tables in 5 seconds")
+    time.sleep(5)
+
+    for data_table in tables:
+        print(f'Deleting table {data_table}')
+        for file in os.listdir(f"{pool.data_path}/{data_table}"):
+            if '.parquet' not in file:
+                continue
+            
+            data = (
+                    pl.scan_parquet(f"{pool.data_path}/{data_table}/{file}")
+                    .filter(pl.col('chain_name') == pool.chain)
+                    .head(10)
+                    .collect()
+                )
+
+            if not data.is_empty():
+                # rip
+                os.remove(f"{pool.data_path}/{data_table}/{file}")
+

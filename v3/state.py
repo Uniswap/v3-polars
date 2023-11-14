@@ -17,6 +17,7 @@ class v3Pool:
         tgt_max_rows=1_000_000,
     ):
         self._Q96 = 2**96
+        self.MAX_TICK = 887272
         self.tgt_max_rows = tgt_max_rows
 
         self.client = bigquery.Client()
@@ -198,6 +199,9 @@ class v3Pool:
 
             if iterations == 0:
                 print("Nothing to update")
+    
+    def delete_tables(self, tables):
+        drop_tables(self, tables) 
 
     def readFromMemoryOrDisk(self, data, data_path, pull=False):
         if data == "pool_swap_events":
@@ -235,6 +239,9 @@ class v3Pool:
                             "tick_lower": pl.Int64,
                             "tick_upper": pl.Int64,
                             "type_of_event": pl.Float64})
+                    .with_columns(
+                        as_of=pl.col("block_number") + pl.col("transaction_index") / 1e4
+                    )
                     .collect()
                     .sort("block_number")
                 )
@@ -245,6 +252,9 @@ class v3Pool:
                 return self.cache["mb"]
 
     def calcSwapDF(self, as_of):
+        if self.cache['as_of'] == as_of:
+            return self.cache["swapDF"], self.cache["inRangeValues"]
+        
         as_of, df, inRangeValues = createSwapDF(as_of, self)
 
         self.cache["as_of"] = as_of
@@ -282,8 +292,8 @@ class v3Pool:
         else:
             return int(price)
         
-    def getPriceSeries(self, as_of):
-        px = getPriceSeries(self, as_of)
+    def getPriceSeries(self, as_of, frequency='6h', gas = False):
+        px = getPriceSeries(self, as_of, frequency, gas)
 
         return px
     
@@ -293,7 +303,10 @@ class v3Pool:
     # bn, pool, data, data_path
     def createLiq(self, as_of):
         return createLiq(as_of, self, "pool_mint_burn_events", self.data_path)
-
+    
+    def swapIn(self, calldata):
+        return swapIn(calldata, self)
+    
     @property
     def getSwaps(self):
         assert self.initialized, "Pool not initialized"

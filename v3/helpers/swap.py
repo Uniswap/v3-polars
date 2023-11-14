@@ -1,8 +1,12 @@
 from .swap_math import *
 
-def parseEntry(calldata, field, required=True):
+def parseEntry(calldata, field, default = False, required=True):
     entry = calldata.get(field, None)
-    assert entry != None or required, f"Missing {field}"
+
+    assert entry != None or not required, f"Missing {field}"
+
+    if entry == None:
+        return default
 
     return entry
 
@@ -12,8 +16,9 @@ def parseCalldata(calldata):
     tokenIn = parseEntry(calldata, "tokenIn")
     swapIn = parseEntry(calldata, "swapIn")
     findMax = parseEntry(calldata, "findMax", required=False)
+    fees = parseEntry(calldata, "fees", required=False)
 
-    return as_of, tokenIn, swapIn, findMax
+    return (as_of, tokenIn, swapIn, findMax, fees)
 
 
 def inRangeTesting(zeroForOne, inRange0, inRangeToSwap0, inRange1, inRangeToSwap1):
@@ -36,8 +41,16 @@ def swapIn(calldata, pool):
 
     swapIn(calldata, pool)
     """
-    as_of, tokenIn, swapIn, findMax = parseCalldata(calldata)
+    (as_of, tokenIn, swapIn, findMax, fees) = parseCalldata(calldata)
+    
+    if type(swapIn) == str:
+        # i use strings in default polars bc big ints
+        # sometimes i forget they are strings, so i cast them
+        swapIn = float(swapIn) 
 
+    # stops us from hitting annoying bugs
+    assert swapIn != 0, "We do not support swaps of 0"
+    
     if as_of != pool.cache["as_of"]:
         pool.calcSwapDF(as_of)
 
@@ -45,8 +58,10 @@ def swapIn(calldata, pool):
 
     zeroForOne = True
     assetIn, assetOut = "x", "y"
+    
+    feeDict = {}
 
-    if tokenIn == pool.token1:
+    if tokenIn.lower() == pool.token1:
         zeroForOne = False
         assetIn, assetOut = "y", "x"
 
@@ -87,6 +102,9 @@ def swapIn(calldata, pool):
             )
             amtOut = get_amount1_delta(sqrtPriceLast, sqrt_P, liquidity)
 
+        if fees:
+            feeDict[tick_in_range] = (swapIn * (pool.fee / 1e6), liquidity)
+
     # we gotta shift tick(s) lol
     else:
         """
@@ -98,18 +116,23 @@ def swapIn(calldata, pool):
         however here, we vectorize precompute every single tick possible to move over and then find the tick
         cumulatively that has enough for us to swap into
         """
-        leftToSwap = swapInMinusFee - inRangeTest
+        leftToSwap = swapIn - inRangeTest
+        leftToSwapMinusFee = leftToSwap * (1 - pool.fee / 1e6)
+    
+        # calculate the current in-range liquidity
+        if fees:
+            feeDict[tick_in_range] = (inRangeTest * (pool.fee / 1e6), liquidity_in_range)
 
         # we precompute all possible ticks
         oor = (
             swap_df.filter(
                 (
-                    pl.col("tick") < tick_in_range
+                    pl.col("tick_a") < tick_in_range
                     if zeroForOne
-                    else pl.col("tick") > tick_in_range
+                    else pl.col("tick_a") > tick_in_range
                 )
             )
-            .sort(pl.col("tick"), descending=zeroForOne)
+            .sort(pl.col("tick_a"), descending=zeroForOne)
             .with_columns(
                 cumulativeX=pl.col("xInTick").cumsum(),
                 cumulativeY=pl.col("yInTick").cumsum(),
@@ -120,19 +143,17 @@ def swapIn(calldata, pool):
 
         maxAmountOut = oor.select(assetColumn).max().item()
 
-        if findMax:
-            pass
         assert maxAmountOut > leftToSwap, "Not enough liquidity in pool"
 
         # this is the tick that has cumulatively enough liquidity to support
         # our entire trade
-        liquidTickRow = oor.filter(assetColumn >= leftToSwap).head(1)
+        liquidTickRow = oor.filter(assetColumn >= leftToSwapMinusFee).head(1)
 
-        liquidTick = liquidTickRow["tick"].item()
+        liquidTick = liquidTickRow["tick_a"].item()
 
         # find the previous ticks
         previousTicks = oor.filter(
-            pl.col("tick") > liquidTick if zeroForOne else pl.col("tick") < liquidTick
+            pl.col("tick_a") > liquidTick if zeroForOne else pl.col("tick_a") < liquidTick
         )
 
         sqrt_P_last_top, sqrt_P_last_bottom = (
@@ -143,9 +164,18 @@ def swapIn(calldata, pool):
         liquidity = liquidTickRow["liquidity"].item()
 
         amtInToSwapLeft = leftToSwap - previousTicks[f"{assetIn}InTick"].sum()
+        
         # fee support goes here
         amtInSwappedLeftMinusFee = amtInToSwapLeft * (1 - pool.fee / 1e6)
         amtOutPrevTicks = inRangeToSwap + previousTicks[f"{assetOut}InTick"].sum()
+        
+        if fees:
+            # calculate the previous ticks
+            for (tickValue, liquidityInTick, assetInAmts) in previousTicks.select(['tick_a', 'liquidity', f"{assetIn}InTick"]).iter_rows():
+                feeDict[tickValue] = (assetInAmts * (pool.fee / 1e6), liquidityInTick)
+            
+            # calculate the last tick
+            feeDict[liquidTick] = (amtInToSwapLeft * (pool.fee / 1e6), liquidity)
 
         amtOutLastTick, sqrtPriceLast = finalAmtOutFromTick(
             zeroForOne,
@@ -157,4 +187,4 @@ def swapIn(calldata, pool):
 
         amtOut = amtOutLastTick + amtOutPrevTicks
 
-    return amtOut, sqrtPriceLast
+    return amtOut, (sqrtPriceLast, sqrt_P, feeDict)
