@@ -1,6 +1,9 @@
 from .swap_math import *
 
 def parseEntry(calldata, field, default = False, required=True):
+    """
+    Parse the calldata entry and assert if its not required 
+    """
     entry = calldata.get(field, None)
 
     assert entry != None or not required, f"Missing {field}"
@@ -12,6 +15,9 @@ def parseEntry(calldata, field, default = False, required=True):
 
 
 def parseCalldata(calldata):
+    """
+    Parse the calldata to get the entires that we care about
+    """
     as_of = parseEntry(calldata, "as_of")
     tokenIn = parseEntry(calldata, "tokenIn")
     swapIn = parseEntry(calldata, "swapIn")

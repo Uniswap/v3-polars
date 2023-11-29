@@ -7,6 +7,12 @@ import time
 from datetime import date, timedelta, datetime, timezone
 
 def initializePoolFromFactory(addr, chain, data_path):
+    """
+    Looks at the factory and pulls the needed data
+    about the current pool initialization
+
+    This is only available from the factory
+    """
     data_type = "factory_pool_created"
 
     factory = (
@@ -15,7 +21,9 @@ def initializePoolFromFactory(addr, chain, data_path):
         .collect()
     )
 
-    assert factory.shape[0] == 1, "Pool missing from factory"
+
+    assert factory.shape[0] != 0, "Pool missing from factory"
+    assert not factory.shape[0] > 1, "Multiple pools at that address"
 
     ts = int(factory["tickSpacing"].item())
     fee = int(factory["fee"].item())
@@ -26,9 +34,15 @@ def initializePoolFromFactory(addr, chain, data_path):
     return ts, fee, token0, token1
 
 def ceil_dt(dt, delta):
+    """
+    Helper for ceiling the datettime
+    """
     return dt + (datetime.min - dt) % delta
 
 def dtToBN(dt, pool):
+    """
+    For that chain, pulls the data (out of all swap) and gets the closet datetime
+    """
     bn_as_of = (
         pl.scan_parquet(f"{pool.data_path}/pool_swap_events/*.parquet")
          .filter((pl.col('chain_name') == pool.chain) &
@@ -42,6 +56,16 @@ def dtToBN(dt, pool):
     return bn_as_of
 
 def createSwapDF(as_of, pool):
+    """
+    This creates the swap data from that pre-computes most of the values 
+    needed to simulate a swap
+
+    it gets the current pool price, and then created the liquidity distribution
+    at that block, then calculates the amount available to trade.
+
+    it then pre-computes the amounts needed to escape out of the current
+    range as well
+    """
     price = pool.getPriceAt(as_of)
     assert price != None, "Pool not initialized"
 
@@ -154,19 +178,6 @@ def getPriceSeries(pool, start_time, frequency, gas = False):
     price = bn_as_of.join_asof(tick_as_of, on = 'block_timestamp')
 
     return price
-
-def readOVM(path, data_type):
-    mappings = {
-        old: new
-        for old, new in (
-            pl.read_csv(f"{path}/{data_type}/ovm_mapping.csv")
-            .select(["oldaddress", "newaddress"])
-            .iter_rows()
-        )
-    }
-
-    return mappings
-
 
 def drop_tables(pool, tables):
     # support both strings and lists

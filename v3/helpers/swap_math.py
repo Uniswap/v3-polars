@@ -4,18 +4,34 @@ import polars as pl
 
 # math functions
 def priceX96ToTick(price):
+    """
+    Helper to convert sqrtPriceX96 to the current non-int tick of the pool
+    """
     Q96 = 2**96
 
     return np.log((price / Q96) ** 2) / np.log(1.0001)
 
 
 def priceX96ToTickFloor(price, ts):
+    """
+    Helper to convert sqrtPriceX96 to the current integer tick spacing of the pool
+    """
     tick = priceX96ToTick(price)
 
     return (int(math.floor(tick)) // ts) * ts
 
 
 def createLiq(bn, pool, data, data_path):
+    """
+    This is very complicated but 
+    
+    1. it groups all the mints/burns on the same lower tick
+    2. groups all the mints/burns on the same upper tick
+    and inverts the liquidity price
+    3. combines the liquidity at the same tick
+    4. the cumsums
+
+    """
     tl = (
         pool.readFromMemoryOrDisk(data, data_path)
         .with_columns(
@@ -57,6 +73,10 @@ def createLiq(bn, pool, data, data_path):
 def finalAmtOutFromTick(
     zeroForOne, sqrt_P_last_top, sqrt_P_last_bottom, amtInSwappedLeftMinusFee, liquidity
 ):
+    """
+    See https://github.com/Uniswap/v3-core/blob/main/contracts/libraries/SwapMath.sol
+    Specficially computeSwapStep()
+    """
     if zeroForOne:
         sqrtP_next = get_next_price_amount0(
             sqrt_P_last_top, liquidity, amtInSwappedLeftMinusFee, zeroForOne
@@ -78,6 +98,9 @@ def finalAmtOutFromTick(
 
 
 def get_amount0_delta(ratioA, ratioB, liq):
+    """
+    See https://github.com/Uniswap/v3-core/blob/main/contracts/libraries/SqrtPriceMath.sol
+    """
     if ratioA > ratioB:
         ratioA, ratioB = ratioB, ratioA
 
@@ -85,12 +108,18 @@ def get_amount0_delta(ratioA, ratioB, liq):
 
 
 def get_amount1_delta(ratioA, ratioB, liq):
+    """
+    See https://github.com/Uniswap/v3-core/blob/main/contracts/libraries/SqrtPriceMath.sol
+    """
     if ratioA > ratioB:
         ratioA, ratioB = ratioB, ratioA
     return liq * (ratioB - ratioA)
 
 
 def get_next_price_amount0(ratioA, liq, amount, add):
+    """
+    See https://github.com/Uniswap/v3-core/blob/main/contracts/libraries/SqrtPriceMath.sol
+    """
     if add:
         sqrtPrice_trade = (liq * ratioA) / (liq + amount * ratioA)
     else:
@@ -100,6 +129,9 @@ def get_next_price_amount0(ratioA, liq, amount, add):
 
 
 def get_next_price_amount1(ratioA, liq, amount, add):
+    """
+    See https://github.com/Uniswap/v3-core/blob/main/contracts/libraries/SqrtPriceMath.sol
+    """
     if not add:
         sqrtPrice_trade = ratioA + amount / (liq)
     else:
@@ -109,6 +141,9 @@ def get_next_price_amount1(ratioA, liq, amount, add):
 
 
 def get_next_sqrtPrice(ratioA, liq, amount, zeroForOne):
+    """
+    See https://github.com/Uniswap/v3-core/blob/main/contracts/libraries/SqrtPriceMath.sol
+    """
     if zeroForOne:
         sqrtPrice_next = get_next_price_amount0(ratioA, liq, amount, zeroForOne)
     else:
