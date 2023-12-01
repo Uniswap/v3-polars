@@ -278,7 +278,7 @@ def update_tables_cryo(pool, tables=[]):
     raise NotImplementedError("Cryo is not yet implimented")
 
 def update_tables(pool, update_from, tables=[]):
-    if update_from == 'gbq':
+    if update_from == 'gcp':
         update_tables_gbq(pool, tables)
     elif update_from == 'cryo':
         update_tables_cryo(pool, tables)

@@ -1,7 +1,6 @@
 *.ipynb
 .ipynb_checkpoints/
 data/
-*.gif
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -155,3 +154,5 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+!Crosschain_Liquidity_GIF.ipynb

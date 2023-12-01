@@ -39,13 +39,15 @@ def inRangeTesting(zeroForOne, inRange0, inRangeToSwap0, inRange1, inRangeToSwap
 
 def swapIn(calldata, pool):
     """
+    Impliments https://github.com/Uniswap/v3-core/blob/main/contracts/interfaces/IUniswapV3Pool.sol
+    
     calldata = {'as_of': 104043220,
             'tokenIn': pool.token1,
             'swapIn': 5_000_000 * 1e6,
             'findMax': False}
 
 
-    swapIn(calldata, pool)
+    amtIn, _ = swapIn(calldata, pool)
     """
     (as_of, tokenIn, swapIn, findMax, fees) = parseCalldata(calldata)
     
