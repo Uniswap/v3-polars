@@ -1,7 +1,13 @@
 import polars as pl
 import os
 from datetime import date, timedelta, datetime, timezone
-from google.cloud import bigquery
+
+gcp_locked = True
+try:
+    from google.cloud import bigquery
+    gcp_locked = False
+except ImportError:
+    print("Unable to import GCP")
 
 # data updating
 def checkPath(data_type, data_path):
@@ -279,6 +285,7 @@ def update_tables_cryo(pool, tables=[]):
 
 def update_tables(pool, update_from, tables=[]):
     if update_from == 'gcp':
+        assert not gcp_locked, "GCP could not be imported"
         update_tables_gbq(pool, tables)
     elif update_from == 'cryo':
         update_tables_cryo(pool, tables)
