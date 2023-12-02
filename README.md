@@ -2,9 +2,9 @@
  
 ## Uniswap v3 simulator
 ### Features 
-1. Maintain mints/burns/initalizes/factories/swaps on all required chains
+1. Maintain mints/burns/initializes/factories/swaps on all required chains
 2. Creates helpers for reading Uniswap v3 data
-3. Impliments Optimism OVM1 -> EVM migration seemlessly
+3. Implements Optimism OVM1 -> EVM migration seemlessly
 4. Allows swap simulating
 5. Creates liquidity distributions
 6. Historical price helpers
