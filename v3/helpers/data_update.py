@@ -143,7 +143,7 @@ def update_tables_gbq(pool, tables=[]):
     # bigquery strings -> python
     proj_id = "uniswap-labs"
     db = "on_chain_events"
-    client = bigquery.Client()
+    client = bigquery.Client(project = proj_id)
 
     tableToDB = {
         "uniswap-labs.on_chain_events.uniswap_v3_factory_pool_created_events_combined": "factory_pool_created",
