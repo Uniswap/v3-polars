@@ -37,7 +37,7 @@ def inRangeTesting(zeroForOne, inRange0, inRangeToSwap0, inRange1, inRangeToSwap
     return inRangeTest, inRangeToSwap
 
 
-def swapIn(calldata, pool):
+def swapIn(calldata, pool, warn = True):
     """
     Impliments https://github.com/Uniswap/v3-core/blob/main/contracts/interfaces/IUniswapV3Pool.sol
     
@@ -51,6 +51,12 @@ def swapIn(calldata, pool):
     """
     (as_of, tokenIn, swapIn, findMax, fees) = parseCalldata(calldata)
     
+    # there can be a desync between mints/burns and swap pulls
+    # which causes incorrect data
+    if warn:
+        if pool.max_supported < as_of:
+            print("Mint/burn and swap data are not updated at this date")
+
     if type(swapIn) == str:
         # i use strings in default polars bc big ints
         # sometimes i forget they are strings, so i cast them

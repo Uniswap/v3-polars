@@ -122,6 +122,7 @@ def createSwapDF(as_of, pool):
             tick,
         ),
     )
+
 def getPriceSeries(pool, start_time, frequency, gas = False):
     # precompute a dataframe that has the latest block number
     bn_as_of = (
@@ -154,8 +155,11 @@ def getPriceSeries(pool, start_time, frequency, gas = False):
             .cast({"tick": pl.Int64, 'gas_price': pl.UInt64, 'gas_used': pl.UInt64})
             .group_by_dynamic("block_timestamp", every = frequency)
             .agg([pl.col('tick').last().alias('tick'),
-                pl.col('gas_price').last().alias('gas_price'),
+                pl.col('gas_price').quantile(.5).alias("gas_price"),
                 pl.col('gas_used').quantile(.5).alias("gas_used")])
+            .with_columns(gas_price = pl.col("gas_price").forward_fill(),
+                          gas_used = pl.col("gas_used").forward_fill(),
+                          tick = pl.col("tick").forward_fill())
             .collect()
             )
     else:

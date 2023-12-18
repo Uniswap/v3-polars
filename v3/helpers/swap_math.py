@@ -38,7 +38,7 @@ def createLiq(bn, pool, data, data_path):
             liquidity_lower=(pl.col("amount") * pl.col("type_of_event")),
             as_of=pl.col("block_number") + pl.col("transaction_index") / 1e4,
         )
-        .filter(pl.col("as_of") <= bn)
+        .filter(pl.col("as_of") < bn)
         .group_by("tick_lower")
         .agg(pl.col("liquidity_lower").sum())
         .filter(pl.col("liquidity_lower") != 0)
@@ -51,7 +51,7 @@ def createLiq(bn, pool, data, data_path):
             liquidity_upper=(-1 * (pl.col.amount * pl.col.type_of_event)),
             as_of=pl.col("block_number") + pl.col("transaction_index") / 1e4,
         )
-        .filter(pl.col("as_of") <= bn)
+        .filter(pl.col("as_of") < bn)
         .group_by("tick_upper")
         .agg(pl.col("liquidity_upper").sum())
         .filter(pl.col("liquidity_upper") != 0)
