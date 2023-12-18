@@ -11,7 +11,7 @@ class v3Pool:
         update_from = 'gcp',
         low_memory=False,
         update=False,
-        initialize=True,
+        pull = True,
         tgt_max_rows=1_000_000,
     ):
         """
@@ -32,7 +32,7 @@ class v3Pool:
 
         # data adjustments
         self.tgt_max_rows = tgt_max_rows
-        self.initialized = initialize
+        self.pull = pull
         self.low_memory = low_memory
 
         # specific v3 pool/chain data
@@ -58,6 +58,9 @@ class v3Pool:
             "uniswap_v3_pool_initialize_events_combined",
         ]
 
+        # data quality assurances
+        self.max_supported = -1
+
         if update:
             update_tables(self, update_from, self.tables)
 
@@ -74,13 +77,23 @@ class v3Pool:
                 finally:
                     self.chain = "optimism"
 
-        if initialize:
-            self.ts, self.fee, self.token0, self.token1 = initializePoolFromFactory(
-                pool, self.chain, self.data_path
-            )
-            self.swaps = self.readFromMemoryOrDisk(
+        
+        self.ts, self.fee, self.token0, self.token1 = initializePoolFromFactory(
+            pool, self.chain, self.data_path
+        )
+
+        if pull:
+            self.readFromMemoryOrDisk(
                 "pool_swap_events", self.data_path, pull=False
             )
+            self.readFromMemoryOrDisk(
+                "pool_mint_burn_events", self.data_path, pull=False
+            )
+
+            max_bn_of_swaps = self.cache['swaps'].select('block_number').max().item()
+            max_bn_of_mb = self.cache['mb'].select('block_number').max().item()
+
+            self.max_supported = min(max_bn_of_mb, max_bn_of_swaps)
 
     def delete_tables(self, tables):
         """
@@ -137,7 +150,7 @@ class v3Pool:
                         as_of=pl.col("block_number") + pl.col("transaction_index") / 1e4
                     )
                     .collect()
-                    .sort("block_number")
+                    .sort("as_of")
                 )
             else:
                 if "mb" not in self.cache.keys():
@@ -269,13 +282,28 @@ class v3Pool:
         return swapIn(calldata, self)
     
     @property
-    def getSwaps(self):
+    def swaps(self):
         """
         Getter for swaps
         """
-        assert self.initialized, "Pool not initialized"
-
-        return self.swaps
+        if not self.pull:
+            return self.readFromMemoryOrDisk(
+                    "pool_swap_events", self.data_path, pull=True
+                )
+        else:
+            return self.cache['swaps']
+    
+    @property
+    def mb(self):
+        """
+        Getter for mints/burns
+        """
+        if not self.pull:
+            return self.readFromMemoryOrDisk(
+                    "pool_mint_burn_events", self.data_path, pull=True
+                )
+        else:
+            return self.cache['mb']
 
     @property
     def Q96(self):
