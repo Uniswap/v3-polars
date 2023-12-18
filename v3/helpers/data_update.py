@@ -107,7 +107,7 @@ def findSegment(gbq_table, min_block, client, chain, tgt_max_rows):
                     FROM `{gbq_table}` 
                     where chain_name = '{chain}'
                     and block_number >= {min_block}
-                    order by block_number asc
+                    order by block_timestamp asc
                   ) limit {tgt_max_rows}
             )
          """
