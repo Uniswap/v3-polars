@@ -11,7 +11,7 @@ class v3Pool:
         update_from = 'gcp',
         low_memory=False,
         update=False,
-        pull = True,
+        pull=True,
         tgt_max_rows=1_000_000,
     ):
         """
@@ -84,10 +84,10 @@ class v3Pool:
 
         if pull:
             self.readFromMemoryOrDisk(
-                "pool_swap_events", self.data_path, pull=False
+                "pool_swap_events", self.data_path, save=True
             )
             self.readFromMemoryOrDisk(
-                "pool_mint_burn_events", self.data_path, pull=False
+                "pool_mint_burn_events", self.data_path, save=True
             )
 
             max_bn_of_swaps = self.cache['swaps'].select('block_number').max().item()
@@ -101,7 +101,7 @@ class v3Pool:
         """
         drop_tables(self, tables) 
 
-    def readFromMemoryOrDisk(self, data, data_path, pull=False):
+    def readFromMemoryOrDisk(self, data, data_path, save=False):
         """
         Function that either returns a cached version for speed of
         the dataset or calculates them on the fly. This is used by all
@@ -112,31 +112,37 @@ class v3Pool:
         Notice: pull=False caches the data instead of pulling
         """
         if data == "pool_swap_events":
-            if self.low_memory or pull:
-                return (
-                    pl.scan_parquet(f"{data_path}/{data}/*.parquet")
-                    .filter(
-                        (pl.col("address") == self.pool)
-                        & (pl.col("chain_name") == self.chain)
-                    )
-                    .with_columns(
-                        as_of=pl.col("block_number") + pl.col("transaction_index") / 1e4
-                    )
-                    .collect()
-                    .sort("as_of")
-                )
-            else:
-                if "swaps" not in self.cache.keys():
-                    # re-use the code here to pull it
-                    self.cache["swaps"] = self.readFromMemoryOrDisk(
-                        data, data_path, True
-                    )
-
+            if "swaps" in self.cache.keys():
+                print("Found")
                 return self.cache["swaps"]
+            
+            else:
+                print("Not found")
+                df = (
+                        pl.scan_parquet(f"{data_path}/{data}/*.parquet")
+                        .filter(
+                            (pl.col("address") == self.pool)
+                            & (pl.col("chain_name") == self.chain)
+                        )
+                        .with_columns(
+                            as_of=pl.col("block_number") + pl.col("transaction_index") / 1e4
+                        )
+                        .collect()
+                        .sort("as_of")
+                    )
+                if save:
+                    self.cache["swaps"] = df
+
+                return df 
 
         elif data == "pool_mint_burn_events":
-            if self.low_memory or pull:
-                return (
+            if "mb" in self.cache.keys():
+                print("Found")
+                return self.cache["mb"]
+            
+            else:
+                print("Not found")
+                df = (
                     pl.scan_parquet(f"{data_path}/{data}/*.parquet")
                     .filter(
                         (pl.col("address") == self.pool)
@@ -152,12 +158,11 @@ class v3Pool:
                     .collect()
                     .sort("as_of")
                 )
-            else:
-                if "mb" not in self.cache.keys():
-                    self.cache["mb"] = self.readFromMemoryOrDisk(data, data_path, True)
+                if save:
+                    self.cache["mb"] = df
 
-                return self.cache["mb"]
-
+                return df
+        
     def calcSwapDF(self, as_of):
         """
         @inherit from pool_helpers.createSwapDF
