@@ -113,11 +113,9 @@ class v3Pool:
         """
         if data == "pool_swap_events":
             if "swaps" in self.cache.keys():
-                print("Found")
                 return self.cache["swaps"]
             
             else:
-                print("Not found")
                 df = (
                         pl.scan_parquet(f"{data_path}/{data}/*.parquet")
                         .filter(
@@ -137,11 +135,9 @@ class v3Pool:
 
         elif data == "pool_mint_burn_events":
             if "mb" in self.cache.keys():
-                print("Found")
                 return self.cache["mb"]
             
             else:
-                print("Not found")
                 df = (
                     pl.scan_parquet(f"{data_path}/{data}/*.parquet")
                     .filter(
