@@ -39,11 +39,16 @@ class v3Pool:
         self.chain = chain
         # remove checksums
         self.pool = pool.lower()
-        
+        self.slot0 = {'initialized': False,
+                      'next_blocks': pl.DataFrame(),
+                      'prev_blocks': pl.DataFrame(),
+                      'next_block': pl.DataFrame(),
+                      'prev_block': pl.DataFrame(),
+                      'current': -1}
+
         # this is the cache where we store data if needed
         self.cache = {}
-        self.cache["as_of"] = 0
-
+    
         # data checkers
         self.path = f"{PACKAGEDIR}/data"
         self.data_path = f"{PACKAGEDIR}/data"
@@ -123,6 +128,9 @@ class v3Pool:
                             & (pl.col("chain_name") == self.chain)
                         )
                         .with_columns(
+                            # TODO
+                            # will overflow if block has more than 10k txs
+                            # need to think of a better way lol
                             as_of=pl.col("block_number") + pl.col("transaction_index") / 1e4
                         )
                         .collect()
@@ -169,12 +177,30 @@ class v3Pool:
         Notice: as_of is the block + transaction index / 1e4. 
         Notice: Returns the value before the transaction at that index was done
         """
-        if self.cache['as_of'] == as_of:
-            return self.cache["swapDF"], self.cache["inRangeValues"]
+        # this is initalized after first swap run
+        if self.slot0['initialized']:
+            next_block = slot0ToAsOf(self.slot0['next_block'])
+            prev_block = slot0ToAsOf(self.slot0['prev_block'])
+        
+            # this should not be possible
+            assert not prev_block.is_empty(), "slot0 is initialized but blocks are not"
+            
+            # state is still valid and we can just rotate as_of
+            # NOTE: we replace the tx at as_of with our tx
+            # thus if txs would be equal to as_of, then we replace them
+            # which is why we equal here
+            if (prev_block <= as_of) and (as_of <= next_block):
+                # TODO rotating liquidity state is much more expensive 
+                # and compartiviely less frequent. if swaps are the only
+                # thing that changes, then we can cheapily update state
+                # a quick check shows liquidity calulations are like 130ms
+                # while the rotate should take ~30ms
+                self.slot0['as_of'] = as_of
+                return self.cache["swapDF"], self.cache["inRangeValues"]
         
         as_of, df, inRangeValues = createSwapDF(as_of, self)
 
-        self.cache["as_of"] = as_of
+        self.slot0['as_of'] = as_of
         self.cache["swapDF"] = df
         self.cache["inRangeValues"] = inRangeValues
 

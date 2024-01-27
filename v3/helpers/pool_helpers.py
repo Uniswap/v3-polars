@@ -55,6 +55,39 @@ def dtToBN(dt, pool):
     
     return bn_as_of
 
+def slot0ToAsOf(entry):
+    bn = ((entry['block_number'] + 
+                   entry['transaction_index'] / 1e4
+                )
+                .item())
+    
+    return bn
+
+def createValidAsOf(as_of, pool):
+    segment = pl.concat([(pool.cache['swaps']
+                      .select([pl.col("block_number"), pl.col('transaction_index')])
+                      .with_columns(type_of_int = pl.lit('swap'))
+                     ),
+                     (pool.cache['mb']
+                      .select([pl.col("block_number"), pl.col('transaction_index')])
+                      .with_columns(type_of_int = pl.lit('mb'))
+                     )])
+
+
+    prev_blocks, next_blocks = pull_block_segments(segment, as_of)
+
+    # TODO
+    # utilize these list to optimally figure out how to apply deltas
+    # instead of recalcing everything (which is v expensive)
+    # this is mostly a liquidity optimization
+    pool.slot0['next_blocks'] = next_blocks
+    pool.slot0['prev_blocks'] = prev_blocks
+
+    pool.slot0['next_block'] = next_blocks.head(1)
+    pool.slot0['prev_block'] = prev_blocks.tail(1)
+
+    pool.slot0['initialized'] = True
+
 def createSwapDF(as_of, pool):
     """
     This creates the swap data from that pre-computes most of the values 
@@ -108,6 +141,9 @@ def createSwapDF(as_of, pool):
 
     inRange1 = get_amount1_delta(p_b, sqrt_P, liquidity)
     inRangeToSwap1 = get_amount0_delta(p_b, sqrt_P, liquidity)
+
+    # fill slot0
+    createValidAsOf(as_of, pool)
 
     return (
         as_of,
@@ -209,3 +245,51 @@ def drop_tables(pool, tables):
                 # rip
                 os.remove(f"{pool.data_path}/{data_table}/{file}")
 
+
+def pull_block_segments(segment, as_of, n_saved = 1_000):
+    blocks = (segment # this segment is generally like 5m rows
+             .sort(by = pl.col("block_number")) # we avoid a second sort here
+        ) 
+
+    prev_blocks = blocks.filter(pl.col('block_number') <= as_of).tail(n_saved)
+    next_blocks = blocks.filter(pl.col('block_number') >= as_of).head(n_saved)
+
+    del blocks # remove this huge dataset asap
+
+    # we need to cut off the last block of both segements 
+    # because we are not sure if we actually pulled all of 
+    # that block (since we arent sorting based on tx_index 
+    # since its an added sort) this is bc we want to sort 
+    # the entire dataframe twice after we truncate
+    min_block = prev_blocks.select(pl.col("block_number").min())
+    prev_blocks = (prev_blocks.filter(pl.col("block_number") > min_block)
+                   .sort("block_number", "transaction_index", descending=[False, False])
+                  )
+
+    max_block = next_blocks.select(pl.col("block_number").max())
+    next_blocks = (next_blocks.filter(pl.col("block_number") < max_block)
+                   .sort("block_number", "transaction_index", descending=[False, False])
+                  )
+    
+    return prev_blocks, next_blocks
+
+def initialize_blocks(self, as_of):
+    segment = pl.concat([(self.cache['swaps']
+                          .select([pl.col("block_number"), pl.col('transaction_index')])
+                          .with_columns(type_of_int = pl.lit('swap'))
+                         ),
+                         (self.cache['mb']
+                          .select([pl.col("block_number"), pl.col('transaction_index')])
+                          .with_columns(type_of_int = pl.lit('mb'))
+                         )])
+
+
+    prev_blocks, next_blocks = pull_block_segments(segment, as_of)
+
+    # TODO
+    # utilize this list to optimally figure out how to apply deltas
+    self.slot0['initialized'] = True
+    self.slot0['next_blocks'] = next_blocks
+    self.slot0['prev_blocks'] = prev_blocks
+    self.slot0['next_block'] = next_blocks.head(1)
+    self.slot0['prev_block'] = prev_blocks.tail(1)
