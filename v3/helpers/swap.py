@@ -65,7 +65,9 @@ def swapIn(calldata, pool, warn = True):
     # stops us from hitting annoying bugs
     assert swapIn != 0, "We do not support swaps of 0"
     
-    if as_of != pool.cache["as_of"]:
+    if as_of != pool.slot0["as_of"]:
+        # there is an early return if the as_of is still valid
+        # compared to current state in here
         pool.calcSwapDF(as_of)
 
     swap_df, inRangeValues = pool.cache["swapDF"], pool.cache["inRangeValues"]
