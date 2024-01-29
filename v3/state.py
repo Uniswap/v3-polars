@@ -219,7 +219,6 @@ class v3Pool:
                         if nextMB < as_of:
                             rotationValid = True
 
-        print(f"rotation was {rotationValid}")
         as_of, df, inRangeValues = createSwapDF(as_of, self, rotationValid)
 
         self.slot0['as_of'] = as_of
