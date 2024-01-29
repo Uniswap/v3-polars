@@ -11,7 +11,7 @@ class v3Pool:
         update_from = 'gcp',
         low_memory=False,
         update=False,
-        initialize=True,
+        pull=True,
         tgt_max_rows=1_000_000,
     ):
         """
@@ -32,7 +32,7 @@ class v3Pool:
 
         # data adjustments
         self.tgt_max_rows = tgt_max_rows
-        self.initialized = initialize
+        self.pull = pull
         self.low_memory = low_memory
 
         # specific v3 pool/chain data
@@ -58,6 +58,9 @@ class v3Pool:
             "uniswap_v3_pool_initialize_events_combined",
         ]
 
+        # data quality assurances
+        self.max_supported = -1
+
         if update:
             update_tables(self, update_from, self.tables)
 
@@ -74,13 +77,23 @@ class v3Pool:
                 finally:
                     self.chain = "optimism"
 
-        if initialize:
-            self.ts, self.fee, self.token0, self.token1 = initializePoolFromFactory(
-                pool, self.chain, self.data_path
+        
+        self.ts, self.fee, self.token0, self.token1 = initializePoolFromFactory(
+            pool, self.chain, self.data_path
+        )
+
+        if pull:
+            self.readFromMemoryOrDisk(
+                "pool_swap_events", self.data_path, save=True
             )
-            self.swaps = self.readFromMemoryOrDisk(
-                "pool_swap_events", self.data_path, pull=False
+            self.readFromMemoryOrDisk(
+                "pool_mint_burn_events", self.data_path, save=True
             )
+
+            max_bn_of_swaps = self.cache['swaps'].select('block_number').max().item()
+            max_bn_of_mb = self.cache['mb'].select('block_number').max().item()
+
+            self.max_supported = min(max_bn_of_mb, max_bn_of_swaps)
 
     def delete_tables(self, tables):
         """
@@ -88,7 +101,7 @@ class v3Pool:
         """
         drop_tables(self, tables) 
 
-    def readFromMemoryOrDisk(self, data, data_path, pull=False):
+    def readFromMemoryOrDisk(self, data, data_path, save=False):
         """
         Function that either returns a cached version for speed of
         the dataset or calculates them on the fly. This is used by all
@@ -99,31 +112,33 @@ class v3Pool:
         Notice: pull=False caches the data instead of pulling
         """
         if data == "pool_swap_events":
-            if self.low_memory or pull:
-                return (
-                    pl.scan_parquet(f"{data_path}/{data}/*.parquet")
-                    .filter(
-                        (pl.col("address") == self.pool)
-                        & (pl.col("chain_name") == self.chain)
-                    )
-                    .with_columns(
-                        as_of=pl.col("block_number") + pl.col("transaction_index") / 1e4
-                    )
-                    .collect()
-                    .sort("as_of")
-                )
-            else:
-                if "swaps" not in self.cache.keys():
-                    # re-use the code here to pull it
-                    self.cache["swaps"] = self.readFromMemoryOrDisk(
-                        data, data_path, True
-                    )
-
+            if "swaps" in self.cache.keys():
                 return self.cache["swaps"]
+            
+            else:
+                df = (
+                        pl.scan_parquet(f"{data_path}/{data}/*.parquet")
+                        .filter(
+                            (pl.col("address") == self.pool)
+                            & (pl.col("chain_name") == self.chain)
+                        )
+                        .with_columns(
+                            as_of=pl.col("block_number") + pl.col("transaction_index") / 1e4
+                        )
+                        .collect()
+                        .sort("as_of")
+                    )
+                if save:
+                    self.cache["swaps"] = df
+
+                return df 
 
         elif data == "pool_mint_burn_events":
-            if self.low_memory or pull:
-                return (
+            if "mb" in self.cache.keys():
+                return self.cache["mb"]
+            
+            else:
+                df = (
                     pl.scan_parquet(f"{data_path}/{data}/*.parquet")
                     .filter(
                         (pl.col("address") == self.pool)
@@ -137,14 +152,13 @@ class v3Pool:
                         as_of=pl.col("block_number") + pl.col("transaction_index") / 1e4
                     )
                     .collect()
-                    .sort("block_number")
+                    .sort("as_of")
                 )
-            else:
-                if "mb" not in self.cache.keys():
-                    self.cache["mb"] = self.readFromMemoryOrDisk(data, data_path, True)
+                if save:
+                    self.cache["mb"] = df
 
-                return self.cache["mb"]
-
+                return df
+        
     def calcSwapDF(self, as_of):
         """
         @inherit from pool_helpers.createSwapDF
@@ -269,13 +283,28 @@ class v3Pool:
         return swapIn(calldata, self)
     
     @property
-    def getSwaps(self):
+    def swaps(self):
         """
         Getter for swaps
         """
-        assert self.initialized, "Pool not initialized"
-
-        return self.swaps
+        if not self.pull:
+            return self.readFromMemoryOrDisk(
+                    "pool_swap_events", self.data_path, pull=True
+                )
+        else:
+            return self.cache['swaps']
+    
+    @property
+    def mb(self):
+        """
+        Getter for mints/burns
+        """
+        if not self.pull:
+            return self.readFromMemoryOrDisk(
+                    "pool_mint_burn_events", self.data_path, pull=True
+                )
+        else:
+            return self.cache['mb']
 
     @property
     def Q96(self):
