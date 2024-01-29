@@ -94,6 +94,12 @@ def pull_block_segments(segment, as_of, n_saved = 1_000):
     return prev_blocks, next_blocks
 
 def initialize_blocks(pool, as_of):
+    # TODO
+    # this means that we are not optimizing code
+    # do this better lol 
+    if pool.cache['swaps'].is_empty():
+        return
+    
     segment = pl.concat([(pool.cache['swaps']
                           .select([pl.col("block_number"), pl.col('transaction_index')])
                           .with_columns(type_of_int = pl.lit('swap'))
@@ -117,6 +123,12 @@ def initialize_blocks(pool, as_of):
     pool.slot0['initialized'] = True
 
 def createValidAsOf(as_of, pool):
+    # TODO
+    # this means that we are not optimizing code
+    # do this better lol 
+    if pool.cache['swaps'].is_empty():
+        return
+    
     segment = pl.concat([(pool.cache['swaps']
                       .select([pl.col("block_number"), pl.col('transaction_index')])
                       .with_columns(type_of_int = pl.lit('swap'))

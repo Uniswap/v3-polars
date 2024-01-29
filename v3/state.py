@@ -203,10 +203,15 @@ class v3Pool:
                             .head(1)
                             )
                     # we may not have pulled the entry
-                    if not entry.is_empty():
-                        nextMB = slot0ToAsOf(entry)
-                        if nextMB > as_of:
-                            rotationValid = True
+                    if entry.is_empty():
+                        # since there are no mbs, we know up until
+                        # the last of prev blocks is valid
+                        entry = (self.slot0['prev_blocks']
+                                    .tail(1)
+                                )
+                    nextMB = slot0ToAsOf(entry)
+                    if nextMB > as_of:
+                        rotationValid = True
                     
                 elif as_of < prev_block:
                     entry = (self.slot0['prev_blocks']
@@ -214,10 +219,14 @@ class v3Pool:
                             .head(1)
                             )
                     
-                    if not entry.is_empty():
-                        nextMB = slot0ToAsOf(entry)
-                        if nextMB < as_of:
-                            rotationValid = True
+                    if entry.is_empty():
+                        entry = (self.slot0['prev_blocks']
+                                    .tail(1)
+                                )
+                        
+                    nextMB = slot0ToAsOf(entry)
+                    if nextMB < as_of:
+                        rotationValid = True
 
         as_of, df, inRangeValues = createSwapDF(as_of, self, rotationValid)
 

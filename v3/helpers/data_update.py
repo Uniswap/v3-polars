@@ -103,12 +103,14 @@ def findSegment(gbq_table, min_block, client, chain, tgt_max_rows):
             from (
                 select * 
                   from (
-                    select block_number
+                    select block_number,
+                            row_number() over (order by block_timestamp asc) as rownum
                     FROM `{gbq_table}` 
                     where chain_name = '{chain}'
                     and block_number >= {min_block}
                     order by block_timestamp asc
-                  ) limit {tgt_max_rows}
+                  ) 
+                where rownum <= {tgt_max_rows}
             )
          """
 
