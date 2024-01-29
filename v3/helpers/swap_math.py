@@ -2,6 +2,7 @@ import numpy as np
 import math
 import polars as pl
 
+
 # math functions
 def priceX96ToTick(price):
     """
@@ -23,8 +24,8 @@ def priceX96ToTickFloor(price, ts):
 
 def createLiq(bn, pool, data, data_path):
     """
-    This is very complicated but 
-    
+    This is very complicated but
+
     1. it groups all the mints/burns on the same lower tick
     2. groups all the mints/burns on the same upper tick
     and inverts the liquidity price

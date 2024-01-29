@@ -6,6 +6,7 @@ import time
 
 from datetime import date, timedelta, datetime, timezone
 
+
 def initializePoolFromFactory(addr, chain, data_path):
     """
     Looks at the factory and pulls the needed data
@@ -21,7 +22,6 @@ def initializePoolFromFactory(addr, chain, data_path):
         .collect()
     )
 
-
     assert factory.shape[0] != 0, "Pool missing from factory"
     assert not factory.shape[0] > 1, "Multiple pools at that address"
 
@@ -33,11 +33,13 @@ def initializePoolFromFactory(addr, chain, data_path):
 
     return ts, fee, token0, token1
 
+
 def ceil_dt(dt, delta):
     """
     Helper for ceiling the datettime
     """
     return dt + (datetime.min - dt) % delta
+
 
 def dtToBN(dt, pool):
     """
@@ -45,99 +47,112 @@ def dtToBN(dt, pool):
     """
     bn_as_of = (
         pl.scan_parquet(f"{pool.data_path}/pool_swap_events/*.parquet")
-         .filter((pl.col('chain_name') == pool.chain) &
-                 (pl.col('block_timestamp') >= dt.replace(tzinfo = timezone.utc)))
-         .select(pl.col("block_number"))
-         .max()
-         .collect()
-         .item()
+        .filter(
+            (pl.col("chain_name") == pool.chain)
+            & (pl.col("block_timestamp") >= dt.replace(tzinfo=timezone.utc))
         )
-    
+        .select(pl.col("block_number"))
+        .max()
+        .collect()
+        .item()
+    )
+
     return bn_as_of
 
+
 def slot0ToAsOf(entry):
-    bn = ((entry['block_number'] + 
-                   entry['transaction_index'] / 1e4
-                )
-                .item())
-    
+    bn = (entry["block_number"] + entry["transaction_index"] / 1e4).item()
+
     return bn
 
+
 # TODO
-# once we can traverse this list we can increased 
+# once we can traverse this list we can increased
 # the n_saved to make this have increased value
-def pull_block_segments(segment, as_of, n_saved = 1_000):
-    blocks = (segment # this segment is generally like 5m rows
-             .sort(by = pl.col("block_number")) # we avoid a second sort here
-        ) 
+def pull_block_segments(segment, as_of, n_saved=1_000):
+    blocks = segment.sort(  # this segment is generally like 5m rows
+        by=pl.col("block_number")
+    )  # we avoid a second sort here
 
-    prev_blocks = blocks.filter(pl.col('block_number') <= as_of).tail(n_saved)
-    next_blocks = blocks.filter(pl.col('block_number') >= as_of).head(n_saved)
+    prev_blocks = blocks.filter(pl.col("block_number") <= as_of).tail(n_saved)
+    next_blocks = blocks.filter(pl.col("block_number") >= as_of).head(n_saved)
 
-    del blocks # remove this huge dataset asap
+    del blocks  # remove this huge dataset asap
 
-    # we need to cut off the last block of both segements 
-    # because we are not sure if we actually pulled all of 
-    # that block (since we arent sorting based on tx_index 
-    # since its an added sort) this is bc we want to sort 
+    # we need to cut off the last block of both segements
+    # because we are not sure if we actually pulled all of
+    # that block (since we arent sorting based on tx_index
+    # since its an added sort) this is bc we want to sort
     # the entire dataframe twice after we truncate
     min_block = prev_blocks.select(pl.col("block_number").min())
-    prev_blocks = (prev_blocks.filter(pl.col("block_number") > min_block)
-                   .sort("block_number", "transaction_index", descending=[False, False])
-                  )
+    prev_blocks = prev_blocks.filter(pl.col("block_number") > min_block).sort(
+        "block_number", "transaction_index", descending=[False, False]
+    )
 
     max_block = next_blocks.select(pl.col("block_number").max())
-    next_blocks = (next_blocks.filter(pl.col("block_number") < max_block)
-                   .sort("block_number", "transaction_index", descending=[False, False])
-                  )
-    
+    next_blocks = next_blocks.filter(pl.col("block_number") < max_block).sort(
+        "block_number", "transaction_index", descending=[False, False]
+    )
+
     return prev_blocks, next_blocks
+
 
 def initialize_blocks(pool, as_of):
     # TODO
     # this means that we are not optimizing code
-    # do this better lol 
-    if pool.cache['swaps'].is_empty():
+    # do this better lol
+    if pool.cache["swaps"].is_empty():
         return
-    
-    segment = pl.concat([(pool.cache['swaps']
-                          .select([pl.col("block_number"), pl.col('transaction_index')])
-                          .with_columns(type_of_int = pl.lit('swap'))
-                         ),
-                         (pool.cache['mb']
-                          .select([pl.col("block_number"), pl.col('transaction_index')])
-                          .with_columns(type_of_int = pl.lit('mb'))
-                         )])
 
+    segment = pl.concat(
+        [
+            (
+                pool.cache["swaps"]
+                .select([pl.col("block_number"), pl.col("transaction_index")])
+                .with_columns(type_of_int=pl.lit("swap"))
+            ),
+            (
+                pool.cache["mb"]
+                .select([pl.col("block_number"), pl.col("transaction_index")])
+                .with_columns(type_of_int=pl.lit("mb"))
+            ),
+        ]
+    )
 
     prev_blocks, next_blocks = pull_block_segments(segment, as_of)
 
     # TODO
     # utilize this list to optimally figure out how to apply deltas
-    pool.slot0['next_blocks'] = next_blocks
-    pool.slot0['prev_blocks'] = prev_blocks
+    pool.slot0["next_blocks"] = next_blocks
+    pool.slot0["prev_blocks"] = prev_blocks
 
-    pool.slot0['next_block'] = next_blocks.head(1)
-    pool.slot0['prev_block'] = prev_blocks.tail(1)
+    pool.slot0["next_block"] = next_blocks.head(1)
+    pool.slot0["prev_block"] = prev_blocks.tail(1)
 
-    pool.slot0['initialized'] = True
+    pool.slot0["initialized"] = True
+
 
 def createValidAsOf(as_of, pool):
     # TODO
     # this means that we are not optimizing code
-    # do this better lol 
-    if pool.cache['swaps'].is_empty():
+    # do this better lol
+    if pool.cache["swaps"].is_empty():
         return
-    
-    segment = pl.concat([(pool.cache['swaps']
-                      .select([pl.col("block_number"), pl.col('transaction_index')])
-                      .with_columns(type_of_int = pl.lit('swap'))
-                     ),
-                     (pool.cache['mb']
-                      .select([pl.col("block_number"), pl.col('transaction_index')])
-                      .with_columns(type_of_int = pl.lit('mb'))
-                     )])
 
+    segment = pl.concat(
+        [
+            (
+                pool.cache["swaps"]
+                .select([pl.col("block_number"), pl.col("transaction_index")])
+                .with_columns(type_of_int=pl.lit("swap"))
+            ),
+            (
+                pool.cache["mb"]
+                .select([pl.col("block_number"), pl.col("transaction_index")])
+                .with_columns(type_of_int=pl.lit("mb"))
+            ),
+        ]
+    )
 
     prev_blocks, next_blocks = pull_block_segments(segment, as_of)
 
@@ -145,17 +160,18 @@ def createValidAsOf(as_of, pool):
     # utilize these list to optimally figure out how to apply deltas
     # instead of recalcing everything (which is v expensive)
     # this is mostly a liquidity optimization
-    pool.slot0['next_blocks'] = next_blocks
-    pool.slot0['prev_blocks'] = prev_blocks
+    pool.slot0["next_blocks"] = next_blocks
+    pool.slot0["prev_blocks"] = prev_blocks
 
-    pool.slot0['next_block'] = next_blocks.head(1)
-    pool.slot0['prev_block'] = prev_blocks.tail(1)
+    pool.slot0["next_block"] = next_blocks.head(1)
+    pool.slot0["prev_block"] = prev_blocks.tail(1)
 
-    pool.slot0['initialized'] = True
+    pool.slot0["initialized"] = True
 
-def createSwapDF(as_of, pool, rotateValid = False):
+
+def createSwapDF(as_of, pool, rotateValid=False):
     """
-    This creates the swap data from that pre-computes most of the values 
+    This creates the swap data from that pre-computes most of the values
     needed to simulate a swap
 
     it gets the current pool price, and then created the liquidity distribution
@@ -172,16 +188,15 @@ def createSwapDF(as_of, pool, rotateValid = False):
     # we've calculated that the lp distribution is the same
     # so we can instead check the new price and go from there
     if rotateValid:
-        liq = pool.slot0['liquidity']
+        liq = pool.slot0["liquidity"]
     else:
         liq = createLiq(as_of, pool, "pool_mint_burn_events", pool.data_path)
-        pool.slot0['liquidity'] = liq
+        pool.slot0["liquidity"] = liq
 
     swap_df = (
         liq.filter(pl.col("liquidity") > 0)  # numerical error
-         .with_columns(tick_b = pl.col('tick').shift(-1),
-                       tick_a = pl.col('tick'))
-        .select(['liquidity', 'tick_a', 'tick_b'])
+        .with_columns(tick_b=pl.col("tick").shift(-1), tick_a=pl.col("tick"))
+        .select(["liquidity", "tick_a", "tick_b"])
         .fill_null((pool.MAX_TICK // pool.ts) * pool.ts)
         .with_columns(
             p_a=(1.0001 ** pl.col("tick_a")) ** (1 / 2),
@@ -194,11 +209,14 @@ def createSwapDF(as_of, pool, rotateValid = False):
         )
     )
 
-    current_tick = swap_df.filter((pl.col("tick_a") <= tickFloor) &
-                                  ((pl.col("tick_b") > tickFloor)))
+    current_tick = swap_df.filter(
+        (pl.col("tick_a") <= tickFloor) & ((pl.col("tick_b") > tickFloor))
+    )
 
-    if (current_tick.shape[0] != 1):
-        raise ValueError(f"Missing/Duplicate in-range tick - Size of {current_tick.shape[0]}")
+    if current_tick.shape[0] != 1:
+        raise ValueError(
+            f"Missing/Duplicate in-range tick - Size of {current_tick.shape[0]}"
+        )
 
     sqrt_P = price / 2**96
     p_a, p_b, liquidity, tick = (
@@ -231,65 +249,79 @@ def createSwapDF(as_of, pool, rotateValid = False):
         ),
     )
 
-def getPriceSeries(pool, start_time, frequency, gas = False):
+
+def getPriceSeries(pool, start_time, frequency, gas=False):
     # precompute a dataframe that has the latest block number
     bn_as_of = (
         pl.scan_parquet(f"{pool.data_path}/pool_swap_events/*.parquet")
-        .filter((pl.col('chain_name') == pool.chain) &
-                (pl.col('block_timestamp') >= start_time.replace(tzinfo = timezone.utc)))
-        .select(['block_timestamp', 'block_number'])
+        .filter(
+            (pl.col("chain_name") == pool.chain)
+            & (pl.col("block_timestamp") >= start_time.replace(tzinfo=timezone.utc))
+        )
+        .select(["block_timestamp", "block_number"])
         .unique()
-        .sort('block_timestamp')
-        .group_by('block_timestamp')
+        .sort("block_timestamp")
+        .group_by("block_timestamp")
         .last()
         .sort("block_timestamp")
-        .group_by_dynamic("block_timestamp", every = frequency)
-        .agg(pl.col('block_number').max())
+        .group_by_dynamic("block_timestamp", every=frequency)
+        .agg(pl.col("block_number").max())
         .collect()
-        )
+    )
 
     if gas:
         tick_as_of = (
             pl.scan_parquet(f"{pool.data_path}/pool_swap_events/*.parquet")
-            .filter((pl.col('chain_name') == pool.chain) &
-                    (pl.col('address') == pool.pool) &
-                    (pl.col('block_timestamp') >= start_time.replace(tzinfo = timezone.utc)))
-            .select(['block_timestamp', 'tick', 'gas_price', 'gas_used'])
+            .filter(
+                (pl.col("chain_name") == pool.chain)
+                & (pl.col("address") == pool.pool)
+                & (pl.col("block_timestamp") >= start_time.replace(tzinfo=timezone.utc))
+            )
+            .select(["block_timestamp", "tick", "gas_price", "gas_used"])
             .unique()
-            .sort('block_timestamp')
-            .group_by('block_timestamp')
+            .sort("block_timestamp")
+            .group_by("block_timestamp")
             .last()
             .sort("block_timestamp")
-            .cast({"tick": pl.Int64, 'gas_price': pl.UInt64, 'gas_used': pl.UInt64})
-            .group_by_dynamic("block_timestamp", every = frequency)
-            .agg([pl.col('tick').last().alias('tick'),
-                pl.col('gas_price').quantile(.5).alias("gas_price"),
-                pl.col('gas_used').quantile(.5).alias("gas_used")])
-            .with_columns(gas_price = pl.col("gas_price").forward_fill(),
-                          gas_used = pl.col("gas_used").forward_fill(),
-                          tick = pl.col("tick").forward_fill())
-            .collect()
+            .cast({"tick": pl.Int64, "gas_price": pl.UInt64, "gas_used": pl.UInt64})
+            .group_by_dynamic("block_timestamp", every=frequency)
+            .agg(
+                [
+                    pl.col("tick").last().alias("tick"),
+                    pl.col("gas_price").quantile(0.5).alias("gas_price"),
+                    pl.col("gas_used").quantile(0.5).alias("gas_used"),
+                ]
             )
+            .with_columns(
+                gas_price=pl.col("gas_price").forward_fill(),
+                gas_used=pl.col("gas_used").forward_fill(),
+                tick=pl.col("tick").forward_fill(),
+            )
+            .collect()
+        )
     else:
         tick_as_of = (
             pl.scan_parquet(f"{pool.data_path}/pool_swap_events/*.parquet")
-            .filter((pl.col('chain_name') == pool.chain) &
-                    (pl.col('address') == pool.pool) &
-                    (pl.col('block_timestamp') >= start_time.replace(tzinfo = timezone.utc)))
-            .select(['block_timestamp', 'tick'])
+            .filter(
+                (pl.col("chain_name") == pool.chain)
+                & (pl.col("address") == pool.pool)
+                & (pl.col("block_timestamp") >= start_time.replace(tzinfo=timezone.utc))
+            )
+            .select(["block_timestamp", "tick"])
             .unique()
-            .sort('block_timestamp')
-            .group_by('block_timestamp')
+            .sort("block_timestamp")
+            .group_by("block_timestamp")
             .last()
             .sort("block_timestamp")
             .cast({"tick": pl.Int64})
-            .group_by_dynamic("block_timestamp", every = frequency)
-            .agg([pl.col('tick').last().alias('tick')])
+            .group_by_dynamic("block_timestamp", every=frequency)
+            .agg([pl.col("tick").last().alias("tick")])
             .collect()
-            )
-    price = bn_as_of.join_asof(tick_as_of, on = 'block_timestamp')
+        )
+    price = bn_as_of.join_asof(tick_as_of, on="block_timestamp")
 
     return price
+
 
 def drop_tables(pool, tables):
     # support both strings and lists
@@ -301,17 +333,17 @@ def drop_tables(pool, tables):
     time.sleep(5)
 
     for data_table in tables:
-        print(f'Deleting table {data_table}')
+        print(f"Deleting table {data_table}")
         for file in os.listdir(f"{pool.data_path}/{data_table}"):
-            if '.parquet' not in file:
+            if ".parquet" not in file:
                 continue
-            
+
             data = (
-                    pl.scan_parquet(f"{pool.data_path}/{data_table}/{file}")
-                    .filter(pl.col('chain_name') == pool.chain)
-                    .head(10)
-                    .collect()
-                )
+                pl.scan_parquet(f"{pool.data_path}/{data_table}/{file}")
+                .filter(pl.col("chain_name") == pool.chain)
+                .head(10)
+                .collect()
+            )
 
             if not data.is_empty():
                 # rip

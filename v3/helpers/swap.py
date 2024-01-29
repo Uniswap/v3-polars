@@ -1,8 +1,9 @@
 from .swap_math import *
 
-def parseEntry(calldata, field, default = False, required=True):
+
+def parseEntry(calldata, field, default=False, required=True):
     """
-    Parse the calldata entry and assert if its not required 
+    Parse the calldata entry and assert if its not required
     """
     entry = calldata.get(field, None)
 
@@ -37,10 +38,10 @@ def inRangeTesting(zeroForOne, inRange0, inRangeToSwap0, inRange1, inRangeToSwap
     return inRangeTest, inRangeToSwap
 
 
-def swapIn(calldata, pool, warn = True):
+def swapIn(calldata, pool, warn=True):
     """
     Impliments https://github.com/Uniswap/v3-core/blob/main/contracts/interfaces/IUniswapV3Pool.sol
-    
+
     calldata = {'as_of': 104043220,
             'tokenIn': pool.token1,
             'swapIn': 5_000_000 * 1e6,
@@ -50,7 +51,7 @@ def swapIn(calldata, pool, warn = True):
     amtIn, _ = swapIn(calldata, pool)
     """
     (as_of, tokenIn, swapIn, findMax, fees) = parseCalldata(calldata)
-    
+
     # there can be a desync between mints/burns and swap pulls
     # which causes incorrect data
     if warn:
@@ -60,11 +61,11 @@ def swapIn(calldata, pool, warn = True):
     if type(swapIn) == str:
         # i use strings in default polars bc big ints
         # sometimes i forget they are strings, so i cast them
-        swapIn = float(swapIn) 
+        swapIn = float(swapIn)
 
     # stops us from hitting annoying bugs
     assert swapIn != 0, "We do not support swaps of 0"
-    
+
     if as_of != pool.slot0["as_of"]:
         # there is an early return if the as_of is still valid
         # compared to current state in here
@@ -74,7 +75,7 @@ def swapIn(calldata, pool, warn = True):
 
     zeroForOne = True
     assetIn, assetOut = "x", "y"
-    
+
     feeDict = {}
 
     if tokenIn.lower() == pool.token1:
@@ -134,10 +135,13 @@ def swapIn(calldata, pool, warn = True):
         """
         leftToSwap = swapIn - inRangeTest
         leftToSwapMinusFee = leftToSwap * (1 - pool.fee / 1e6)
-    
+
         # calculate the current in-range liquidity
         if fees:
-            feeDict[tick_in_range] = (inRangeTest * (pool.fee / 1e6), liquidity_in_range)
+            feeDict[tick_in_range] = (
+                inRangeTest * (pool.fee / 1e6),
+                liquidity_in_range,
+            )
 
         # we precompute all possible ticks
         oor = (
@@ -169,7 +173,9 @@ def swapIn(calldata, pool, warn = True):
 
         # find the previous ticks
         previousTicks = oor.filter(
-            pl.col("tick_a") > liquidTick if zeroForOne else pl.col("tick_a") < liquidTick
+            pl.col("tick_a") > liquidTick
+            if zeroForOne
+            else pl.col("tick_a") < liquidTick
         )
 
         sqrt_P_last_top, sqrt_P_last_bottom = (
@@ -180,16 +186,18 @@ def swapIn(calldata, pool, warn = True):
         liquidity = liquidTickRow["liquidity"].item()
 
         amtInToSwapLeft = leftToSwap - previousTicks[f"{assetIn}InTick"].sum()
-        
+
         # fee support goes here
         amtInSwappedLeftMinusFee = amtInToSwapLeft * (1 - pool.fee / 1e6)
         amtOutPrevTicks = inRangeToSwap + previousTicks[f"{assetOut}InTick"].sum()
-        
+
         if fees:
             # calculate the previous ticks
-            for (tickValue, liquidityInTick, assetInAmts) in previousTicks.select(['tick_a', 'liquidity', f"{assetIn}InTick"]).iter_rows():
+            for tickValue, liquidityInTick, assetInAmts in previousTicks.select(
+                ["tick_a", "liquidity", f"{assetIn}InTick"]
+            ).iter_rows():
                 feeDict[tickValue] = (assetInAmts * (pool.fee / 1e6), liquidityInTick)
-            
+
             # calculate the last tick
             feeDict[liquidTick] = (amtInToSwapLeft * (pool.fee / 1e6), liquidity)
 

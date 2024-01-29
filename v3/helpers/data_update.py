@@ -5,9 +5,11 @@ from datetime import date, timedelta, datetime, timezone
 gcp_locked = True
 try:
     from google.cloud import bigquery
+
     gcp_locked = False
 except ImportError:
     print("Unable to import GCP")
+
 
 # data updating
 def checkPath(data_type, data_path):
@@ -19,16 +21,18 @@ def checkPath(data_type, data_path):
     if not os.path.exists(path):
         os.mkdir(path)
 
+
 def isDS_Store(f):
     """
-    All my homies hate the .DS_Store, so we check 
+    All my homies hate the .DS_Store, so we check
     if the file is .DS_Store before iterating over files
     """
     return f != ".DS_Store"
 
+
 def getHeader(table, data_path):
     """
-    Returns an increasing number that will ensure that there 
+    Returns an increasing number that will ensure that there
     are no collisions. Pulls that number from the files and
     then adds 1 to it.
     """
@@ -121,6 +125,7 @@ def findSegment(gbq_table, min_block, client, chain, tgt_max_rows):
 
     return df.item()
 
+
 def readOVM(path, data_type):
     """
     This is provided by the Optimism team to
@@ -137,6 +142,7 @@ def readOVM(path, data_type):
 
     return mappings
 
+
 def update_tables_gbq(pool, tables=[]):
     """
     This is the big file that pulls from the GBQ servers for the given
@@ -145,7 +151,7 @@ def update_tables_gbq(pool, tables=[]):
     # bigquery strings -> python
     proj_id = "uniswap-labs"
     db = "on_chain_events"
-    client = bigquery.Client(project = proj_id)
+    client = bigquery.Client(project=proj_id)
 
     tableToDB = {
         "uniswap-labs.on_chain_events.uniswap_v3_factory_pool_created_events_combined": "factory_pool_created",
@@ -285,11 +291,12 @@ def update_tables_cryo(pool, tables=[]):
     # TODO
     raise NotImplementedError("Cryo is not yet implimented")
 
+
 def update_tables(pool, update_from, tables=[]):
-    if update_from == 'gcp':
+    if update_from == "gcp":
         assert not gcp_locked, "GCP could not be imported"
         update_tables_gbq(pool, tables)
-    elif update_from == 'cryo':
+    elif update_from == "cryo":
         update_tables_cryo(pool, tables)
     else:
         raise NotImplementedError("Data puller not implimented")

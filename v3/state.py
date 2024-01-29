@@ -1,14 +1,16 @@
 from .helpers import *
 import polars as pl
 from pathlib import Path
+
 PACKAGEDIR = Path(__file__).parent.absolute()
+
 
 class v3Pool:
     def __init__(
         self,
         pool,
         chain,
-        update_from = 'gcp',
+        update_from="gcp",
         low_memory=False,
         update=False,
         pull=True,
@@ -41,18 +43,20 @@ class v3Pool:
         self.pool = pool.lower()
 
         # state where simulations are cached
-        self.slot0 = {'initialized': False,
-                      'next_blocks': pl.DataFrame(),
-                      'prev_blocks': pl.DataFrame(),
-                      'next_block': pl.DataFrame(),
-                      'prev_block': pl.DataFrame(),
-                      'liquidity': pl.DataFrame(),
-                      'as_of': -1}
+        self.slot0 = {
+            "initialized": False,
+            "next_blocks": pl.DataFrame(),
+            "prev_blocks": pl.DataFrame(),
+            "next_block": pl.DataFrame(),
+            "prev_block": pl.DataFrame(),
+            "liquidity": pl.DataFrame(),
+            "as_of": -1,
+        }
 
         # this is the cache where we store data if needed
         # this is used to move disk -> memory -> optimized memory
         self.cache = {}
-    
+
         # data checkers
         self.path = f"{PACKAGEDIR}/data"
         self.data_path = f"{PACKAGEDIR}/data"
@@ -86,21 +90,18 @@ class v3Pool:
                 finally:
                     self.chain = "optimism"
 
-        
         self.ts, self.fee, self.token0, self.token1 = initializePoolFromFactory(
             pool, self.chain, self.data_path
         )
 
         if pull:
-            self.readFromMemoryOrDisk(
-                "pool_swap_events", self.data_path, save=True
-            )
+            self.readFromMemoryOrDisk("pool_swap_events", self.data_path, save=True)
             self.readFromMemoryOrDisk(
                 "pool_mint_burn_events", self.data_path, save=True
             )
 
-            max_bn_of_swaps = self.cache['swaps'].select('block_number').max().item()
-            max_bn_of_mb = self.cache['mb'].select('block_number').max().item()
+            max_bn_of_swaps = self.cache["swaps"].select("block_number").max().item()
+            max_bn_of_mb = self.cache["mb"].select("block_number").max().item()
 
             self.max_supported = min(max_bn_of_mb, max_bn_of_swaps)
 
@@ -108,13 +109,13 @@ class v3Pool:
         """
         See pool_helpers.drop_tables
         """
-        drop_tables(self, tables) 
+        drop_tables(self, tables)
 
     def readFromMemoryOrDisk(self, data, data_path, save=False):
         """
         Function that either returns a cached version for speed of
         the dataset or calculates them on the fly. This is used by all
-        points that read data to 
+        points that read data to
 
         Notice: data is the table
         Notice: data_path is the saved path to the data
@@ -123,32 +124,7 @@ class v3Pool:
         if data == "pool_swap_events":
             if "swaps" in self.cache.keys():
                 return self.cache["swaps"]
-            
-            else:
-                df = (
-                        pl.scan_parquet(f"{data_path}/{data}/*.parquet")
-                        .filter(
-                            (pl.col("address") == self.pool)
-                            & (pl.col("chain_name") == self.chain)
-                        )
-                        .with_columns(
-                            # TODO
-                            # will overflow if block has more than 10k txs
-                            # need to think of a better way lol
-                            as_of=pl.col("block_number") + pl.col("transaction_index") / 1e4
-                        )
-                        .collect()
-                        .sort("as_of")
-                    )
-                if save:
-                    self.cache["swaps"] = df
 
-                return df 
-
-        elif data == "pool_mint_burn_events":
-            if "mb" in self.cache.keys():
-                return self.cache["mb"]
-            
             else:
                 df = (
                     pl.scan_parquet(f"{data_path}/{data}/*.parquet")
@@ -156,10 +132,40 @@ class v3Pool:
                         (pl.col("address") == self.pool)
                         & (pl.col("chain_name") == self.chain)
                     )
-                    .cast({"amount": pl.Float64,
+                    .with_columns(
+                        # TODO
+                        # will overflow if block has more than 10k txs
+                        # need to think of a better way lol
+                        as_of=pl.col("block_number")
+                        + pl.col("transaction_index") / 1e4
+                    )
+                    .collect()
+                    .sort("as_of")
+                )
+                if save:
+                    self.cache["swaps"] = df
+
+                return df
+
+        elif data == "pool_mint_burn_events":
+            if "mb" in self.cache.keys():
+                return self.cache["mb"]
+
+            else:
+                df = (
+                    pl.scan_parquet(f"{data_path}/{data}/*.parquet")
+                    .filter(
+                        (pl.col("address") == self.pool)
+                        & (pl.col("chain_name") == self.chain)
+                    )
+                    .cast(
+                        {
+                            "amount": pl.Float64,
                             "tick_lower": pl.Int64,
                             "tick_upper": pl.Int64,
-                            "type_of_event": pl.Float64})
+                            "type_of_event": pl.Float64,
+                        }
+                    )
                     .with_columns(
                         as_of=pl.col("block_number") + pl.col("transaction_index") / 1e4
                     )
@@ -170,7 +176,7 @@ class v3Pool:
                     self.cache["mb"] = df
 
                 return df
-        
+
     def calcSwapDF(self, as_of):
         """
         @inherit from pool_helpers.createSwapDF
@@ -178,59 +184,57 @@ class v3Pool:
         swapDFs are pre-computed datasets required for swap computation
         They are cached to optimize for multiple swaps at one as_of
 
-        Notice: as_of is the block + transaction index / 1e4. 
+        Notice: as_of is the block + transaction index / 1e4.
         Notice: Returns the value before the transaction at that index was done
         """
         # this is initalized after first swap run
         rotationValid = False
-        if self.slot0['initialized']:
-            next_block = slot0ToAsOf(self.slot0['next_block'])
-            prev_block = slot0ToAsOf(self.slot0['prev_block'])
-        
+        if self.slot0["initialized"]:
+            next_block = slot0ToAsOf(self.slot0["next_block"])
+            prev_block = slot0ToAsOf(self.slot0["prev_block"])
+
             # state is still valid and we can just rotate as_of
             # NOTE: we replace the tx at as_of with our tx
             # thus if txs would be equal to as_of, then we replace them
             # which is why we equal here
             if (prev_block <= as_of) and (as_of <= next_block):
-                self.slot0['as_of'] = as_of
+                self.slot0["as_of"] = as_of
                 return self.cache["swapDF"], self.cache["inRangeValues"]
             # TODO instead of recalculating liquidty from scratch, we can calculate
             # based off a range and apply the deltas to the liquidity distributions
             else:
                 if as_of > next_block:
-                    entry = (self.slot0['next_blocks']
-                            .filter(pl.col('type_of_int') != 'swap')
-                            .head(1)
-                            )
+                    entry = (
+                        self.slot0["next_blocks"]
+                        .filter(pl.col("type_of_int") != "swap")
+                        .head(1)
+                    )
                     # we may not have pulled the entry
                     if entry.is_empty():
                         # since there are no mbs, we know up until
                         # the last of prev blocks is valid
-                        entry = (self.slot0['prev_blocks']
-                                    .tail(1)
-                                )
+                        entry = self.slot0["prev_blocks"].tail(1)
                     nextMB = slot0ToAsOf(entry)
                     if nextMB > as_of:
                         rotationValid = True
-                    
+
                 elif as_of < prev_block:
-                    entry = (self.slot0['prev_blocks']
-                            .filter(pl.col('type_of_int') != 'swap')
-                            .head(1)
-                            )
-                    
+                    entry = (
+                        self.slot0["prev_blocks"]
+                        .filter(pl.col("type_of_int") != "swap")
+                        .head(1)
+                    )
+
                     if entry.is_empty():
-                        entry = (self.slot0['prev_blocks']
-                                    .tail(1)
-                                )
-                        
+                        entry = self.slot0["prev_blocks"].tail(1)
+
                     nextMB = slot0ToAsOf(entry)
                     if nextMB < as_of:
                         rotationValid = True
 
         as_of, df, inRangeValues = createSwapDF(as_of, self, rotationValid)
 
-        self.slot0['as_of'] = as_of
+        self.slot0["as_of"] = as_of
         self.cache["swapDF"] = df
         self.cache["inRangeValues"] = inRangeValues
 
@@ -240,7 +244,7 @@ class v3Pool:
         """
         Helper function that returns values from columns at the desired time
 
-        Notice: as_of is the block + transaction index / 1e4. 
+        Notice: as_of is the block + transaction index / 1e4.
         Notice: Returns the value before the transaction at that index was done
         """
         pool_property = (
@@ -257,7 +261,7 @@ class v3Pool:
         """
         Returns the tick from the pool as_of the given block/transaction_index.
 
-        Notice: as_of is the block + transaction index / 1e4. 
+        Notice: as_of is the block + transaction index / 1e4.
         Notice: Returns the value before the transaction at that index was done
         """
         tick = self.getPropertyFrom(as_of, "tick")
@@ -267,12 +271,12 @@ class v3Pool:
             return None
         else:
             return int(tick)
- 
+
     def getPriceAt(self, as_of, revert_on_uninitialized=False):
         """
         Returns the sqrtPriceX96 from the pool as_of the given block/transaction_index.
 
-        Notice: as_of is the block + transaction index / 1e4. 
+        Notice: as_of is the block + transaction index / 1e4.
         Notice: Returns the value before the transaction at that index was done
         """
         price = self.getPropertyFrom(as_of, "sqrtPriceX96")
@@ -282,39 +286,39 @@ class v3Pool:
             return None
         else:
             return int(price)
-        
-    def getPriceSeries(self, as_of, frequency='6h', gas = False):
+
+    def getPriceSeries(self, as_of, frequency="6h", gas=False):
         """
         @inhert from pool_helpers.getPriceSeries
-        Create a price series resampled to the desired frequency 
+        Create a price series resampled to the desired frequency
         starting at as_of
 
-        Notice: as_of is the block + transaction index / 1e4. 
+        Notice: as_of is the block + transaction index / 1e4.
         """
         px = getPriceSeries(self, as_of, frequency, gas)
 
         return px
-    
+
     def getBNAtDate(self, as_of):
         """
         @inhert from pool_helpers.dtToBN
         Returns the last block number at that datetime
 
-        Notice: as_of is the block + transaction index / 1e4. 
+        Notice: as_of is the block + transaction index / 1e4.
         """
-        
+
         return dtToBN(as_of, self)
-    
+
     def createLiq(self, as_of):
         """
         @inhert from pool_helpers.createSwapDF
         Creates a liquidity distribution as_of that time
-        
-        Notice: as_of is the block + transaction index / 1e4. 
+
+        Notice: as_of is the block + transaction index / 1e4.
         """
-        
+
         return createLiq(as_of, self, "pool_mint_burn_events", self.data_path)
-    
+
     def swapIn(self, calldata):
         """
         @inherit from swap.swapIn
@@ -322,22 +326,22 @@ class v3Pool:
 
         Calldata takes the form:
         calldata = {# the time of the swap
-                    'as_of': as_of, 
+                    'as_of': as_of,
                     # the token address going in
-                    'tokenIn': address 
+                    'tokenIn': address
                     # the amount of tokens going in
-                    'swapIn': amount 
+                    'swapIn': amount
                     # skips the swap and calculates max amount out
                     'findMax': False,
-                    # calculates fees accured to each tick 
+                    # calculates fees accured to each tick
                     'fees': True
-                    } 
-        
-        Notice: as_of is the block + transaction index / 1e4. 
+                    }
+
+        Notice: as_of is the block + transaction index / 1e4.
         """
-        
+
         return swapIn(calldata, self)
-    
+
     @property
     def swaps(self):
         """
@@ -345,11 +349,11 @@ class v3Pool:
         """
         if not self.pull:
             return self.readFromMemoryOrDisk(
-                    "pool_swap_events", self.data_path, pull=True
-                )
+                "pool_swap_events", self.data_path, pull=True
+            )
         else:
-            return self.cache['swaps']
-    
+            return self.cache["swaps"]
+
     @property
     def mb(self):
         """
@@ -357,10 +361,10 @@ class v3Pool:
         """
         if not self.pull:
             return self.readFromMemoryOrDisk(
-                    "pool_mint_burn_events", self.data_path, pull=True
-                )
+                "pool_mint_burn_events", self.data_path, pull=True
+            )
         else:
-            return self.cache['mb']
+            return self.cache["mb"]
 
     @property
     def Q96(self):
