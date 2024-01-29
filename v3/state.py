@@ -39,14 +39,18 @@ class v3Pool:
         self.chain = chain
         # remove checksums
         self.pool = pool.lower()
+
+        # state where simulations are cached
         self.slot0 = {'initialized': False,
                       'next_blocks': pl.DataFrame(),
                       'prev_blocks': pl.DataFrame(),
                       'next_block': pl.DataFrame(),
                       'prev_block': pl.DataFrame(),
-                      'current': -1}
+                      'liquidity': pl.DataFrame(),
+                      'as_of': -1}
 
         # this is the cache where we store data if needed
+        # this is used to move disk -> memory -> optimized memory
         self.cache = {}
     
         # data checkers
@@ -178,27 +182,45 @@ class v3Pool:
         Notice: Returns the value before the transaction at that index was done
         """
         # this is initalized after first swap run
+        rotationValid = False
         if self.slot0['initialized']:
             next_block = slot0ToAsOf(self.slot0['next_block'])
             prev_block = slot0ToAsOf(self.slot0['prev_block'])
         
-            # this should not be possible
-            assert not prev_block.is_empty(), "slot0 is initialized but blocks are not"
-            
             # state is still valid and we can just rotate as_of
             # NOTE: we replace the tx at as_of with our tx
             # thus if txs would be equal to as_of, then we replace them
             # which is why we equal here
             if (prev_block <= as_of) and (as_of <= next_block):
-                # TODO rotating liquidity state is much more expensive 
-                # and compartiviely less frequent. if swaps are the only
-                # thing that changes, then we can cheapily update state
-                # a quick check shows liquidity calulations are like 130ms
-                # while the rotate should take ~30ms
                 self.slot0['as_of'] = as_of
                 return self.cache["swapDF"], self.cache["inRangeValues"]
-        
-        as_of, df, inRangeValues = createSwapDF(as_of, self)
+            # TODO instead of recalculating liquidty from scratch, we can calculate
+            # based off a range and apply the deltas to the liquidity distributions
+            else:
+                if as_of > next_block:
+                    entry = (self.slot0['next_blocks']
+                            .filter(pl.col('type_of_int') != 'swap')
+                            .head(1)
+                            )
+                    # we may not have pulled the entry
+                    if not entry.is_empty():
+                        nextMB = slot0ToAsOf(entry)
+                        if nextMB > as_of:
+                            rotationValid = True
+                    
+                elif as_of < prev_block:
+                    entry = (self.slot0['prev_blocks']
+                            .filter(pl.col('type_of_int') != 'swap')
+                            .head(1)
+                            )
+                    
+                    if not entry.is_empty():
+                        nextMB = slot0ToAsOf(entry)
+                        if nextMB < as_of:
+                            rotationValid = True
+
+        print(f"rotation was {rotationValid}")
+        as_of, df, inRangeValues = createSwapDF(as_of, self, rotationValid)
 
         self.slot0['as_of'] = as_of
         self.cache["swapDF"] = df
