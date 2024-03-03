@@ -56,10 +56,13 @@ def writeDataset(df, data_type, data_path, max_block_of_segment, min_block_of_se
     """
     Writes the given file with the given heuristics to the disk
     """
-    idx = getHeader(data_type, data_path)
-    df.write_parquet(
-        f"{data_path}/{data_type}/{idx}_{min_block_of_segment}_{max_block_of_segment}_{data_type}.parquet"
-    )
+    if df.is_empty():
+        print("Data pass to save is empty - passing")
+    else:
+        idx = getHeader(data_type, data_path)
+        df.write_parquet(
+            f"{data_path}/{data_type}/{idx}_{min_block_of_segment}_{max_block_of_segment}_{data_type}.parquet"
+        )
 
 
 def readGBQ(gbq_table, max_block_of_segment, min_block_of_segment, client, chain):
@@ -180,7 +183,7 @@ def update_tables_gbq(pool, tables=[]):
         header = getHeader(data_type, pool.data_path)
         # we already have existing data, so lets get the bn to only append new stuff
         if header != 0:
-            print(f"Found data")
+            print(f"Found data saved")
             found_min_block_of_segment = (
                 pl.scan_parquet(f"{pool.path}/{data_type}/*.parquet")
                 .filter(pl.col("chain_name") == pool.chain)
