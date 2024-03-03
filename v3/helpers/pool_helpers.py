@@ -180,7 +180,7 @@ def createSwapDF(as_of, pool, rotateValid=False):
     it then pre-computes the amounts needed to escape out of the current
     range as well
     """
-    price = pool.getPriceAt(as_of)
+    price = pool.getPriceAt(as_of) if givenPrice == 0 else givenPrice
     assert price != None, "Pool not initialized"
 
     tickFloor = priceX96ToTickFloor(price, pool.ts)
@@ -252,6 +252,15 @@ def createSwapDF(as_of, pool, rotateValid=False):
 
 def getPriceSeries(pool, start_time, frequency, gas=False):
     # precompute a dataframe that has the latest block number
+    
+    # TODO
+    # we dont want to always provide an ending time
+    # do this in a better way
+    if end_time == None:
+        end_filter = True
+    else:
+        end_filter = pl.col("block_timestamp") <= end_time.replace(tzinfo=timezone.utc)
+    
     bn_as_of = (
         pl.scan_parquet(f"{pool.data_path}/pool_swap_events/*.parquet")
         .filter(

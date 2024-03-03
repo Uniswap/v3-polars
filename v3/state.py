@@ -295,7 +295,8 @@ class v3Pool:
 
         Notice: as_of is the block + transaction index / 1e4.
         """
-        px = getPriceSeries(self, as_of, frequency, gas)
+
+        px = getPriceSeries(self, as_of, ending, frequency, gas)
 
         return px
 
