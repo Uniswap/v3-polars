@@ -169,7 +169,7 @@ def createValidAsOf(as_of, pool):
     pool.slot0["initialized"] = True
 
 
-def createSwapDF(as_of, pool, rotateValid=False):
+def createSwapDF(as_of, pool, givenPrice = 0, rotateValid=False):
     """
     This creates the swap data from that pre-computes most of the values
     needed to simulate a swap
@@ -266,7 +266,7 @@ def getPriceSeries(pool, start_time, end_time, frequency, gas=False):
         .filter(
             (pl.col("chain_name") == pool.chain)
             & (pl.col("block_timestamp") >= start_time.replace(tzinfo=timezone.utc))
-        )
+            & (end_filter))
         .select(["block_timestamp", "block_number"])
         .unique()
         .sort("block_timestamp")
@@ -285,7 +285,7 @@ def getPriceSeries(pool, start_time, end_time, frequency, gas=False):
                 (pl.col("chain_name") == pool.chain)
                 & (pl.col("address") == pool.pool)
                 & (pl.col("block_timestamp") >= start_time.replace(tzinfo=timezone.utc))
-            )
+                & (end_filter))
             .select(["block_timestamp", "tick", "gas_price", "gas_used"])
             .unique()
             .sort("block_timestamp")
@@ -315,7 +315,7 @@ def getPriceSeries(pool, start_time, end_time, frequency, gas=False):
                 (pl.col("chain_name") == pool.chain)
                 & (pl.col("address") == pool.pool)
                 & (pl.col("block_timestamp") >= start_time.replace(tzinfo=timezone.utc))
-            )
+                & (end_filter))
             .select(["block_timestamp", "tick"])
             .unique()
             .sort("block_timestamp")
