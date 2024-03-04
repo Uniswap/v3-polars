@@ -24,8 +24,9 @@ def parseCalldata(calldata):
     swapIn = parseEntry(calldata, "swapIn")
     findMax = parseEntry(calldata, "findMax", required=False)
     fees = parseEntry(calldata, "fees", required=False)
+    force = parseEntry(calldata, 'forceHardShift', required = False)
 
-    return (as_of, tokenIn, swapIn, findMax, fees)
+    return (as_of, tokenIn, swapIn, findMax, fees, force)
 
 
 def inRangeTesting(zeroForOne, inRange0, inRangeToSwap0, inRange1, inRangeToSwap1):
@@ -50,7 +51,10 @@ def swapIn(calldata, pool, warn=True):
 
     amtIn, _ = swapIn(calldata, pool)
     """
-    (as_of, tokenIn, swapIn, findMax, fees) = parseCalldata(calldata)
+    (as_of, tokenIn, swapIn, findMax, fees, force) = parseCalldata(calldata)
+
+    if force == None:
+        force = False
 
     # there can be a desync between mints/burns and swap pulls
     # which causes incorrect data
@@ -69,7 +73,7 @@ def swapIn(calldata, pool, warn=True):
     if as_of != pool.slot0["as_of"]:
         # there is an early return if the as_of is still valid
         # compared to current state in here
-        pool.calcSwapDF(as_of)
+        pool.calcSwapDF(as_of, force)
 
     swap_df, inRangeValues = pool.cache["swapDF"], pool.cache["inRangeValues"]
 

@@ -177,7 +177,7 @@ class v3Pool:
 
                 return df
 
-    def calcSwapDF(self, as_of):
+    def calcSwapDF(self, as_of, force = False):
         """
         @inherit from pool_helpers.createSwapDF
         Helper function that calculates and caches swapDFs
@@ -186,6 +186,8 @@ class v3Pool:
 
         Notice: as_of is the block + transaction index / 1e4.
         Notice: Returns the value before the transaction at that index was done
+        Notice: we attempt to optimistically shift state if possible, but you can 
+                instead force the code to recalculate
         """
         # this is initalized after first swap run
         rotationValid = False
@@ -197,13 +199,22 @@ class v3Pool:
             # NOTE: we replace the tx at as_of with our tx
             # thus if txs would be equal to as_of, then we replace them
             # which is why we equal here
-            if (prev_block <= as_of) and (as_of <= next_block):
+            if ((prev_block <= as_of) and 
+                (as_of <= next_block) and 
+                (not force)):
+
                 self.slot0["as_of"] = as_of
                 return self.cache["swapDF"], self.cache["inRangeValues"]
+            
             # TODO instead of recalculating liquidty from scratch, we can calculate
             # based off a range and apply the deltas to the liquidity distributions
             else:
-                if as_of > next_block:
+                if force:
+                    # rotationValid = False
+                    # this should already be False so noop
+                    pass
+
+                elif as_of > next_block:
                     entry = (
                         self.slot0["next_blocks"]
                         .filter(pl.col("type_of_int") != "swap")
@@ -231,7 +242,7 @@ class v3Pool:
                     nextMB = slot0ToAsOf(entry)
                     if nextMB < as_of:
                         rotationValid = True
-
+                
         as_of, df, inRangeValues = createSwapDF(as_of, self, rotationValid)
 
         self.slot0["as_of"] = as_of
