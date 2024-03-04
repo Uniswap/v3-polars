@@ -250,7 +250,7 @@ def createSwapDF(as_of, pool, rotateValid=False):
     )
 
 
-def getPriceSeries(pool, start_time, frequency, gas=False):
+def getPriceSeries(pool, start_time, end_time, frequency, gas=False):
     # precompute a dataframe that has the latest block number
     
     # TODO

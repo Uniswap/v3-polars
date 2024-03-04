@@ -287,7 +287,7 @@ class v3Pool:
         else:
             return int(price)
 
-    def getPriceSeries(self, as_of, frequency="6h", gas=False):
+    def getPriceSeries(self, as_of, ending=None, frequency="6h", gas=False):
         """
         @inhert from pool_helpers.getPriceSeries
         Create a price series resampled to the desired frequency
