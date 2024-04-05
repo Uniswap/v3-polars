@@ -53,22 +53,21 @@ def getHeader(table, data_path):
     return max(max_index) + 1
 
 
-def writeDataset(df, data_type, data_path, max_block_of_segment, min_block_of_segment):
+def writeDataset(df, table, data_path, max_block_of_segment, min_block_of_segment):
     """
     Writes the given file with the given heuristics to the disk
     """
-    idx = getHeader(data_type, data_path)
+    idx = getHeader(table, data_path)
     df.write_parquet(
-        f"{data_path}/{data_type}/{idx}_{min_block_of_segment}_{max_block_of_segment}_{data_type}.parquet"
+        f"{data_path}/{table}/{idx}_{min_block_of_segment}_{max_block_of_segment}_{table}.parquet"
     )
 
 
-def readRemote(
-    table, connector, max_block_of_segment, min_block_of_segment, client, chain
-):
+def readRemote(table, connector, max_block_of_segment, min_block_of_segment, chain):
     """
     Read the raw dataframe from remote
     """
+
     q = connector.get_template(
         "read", table, max_block_of_segment, min_block_of_segment, chain
     )
@@ -118,32 +117,13 @@ def readOVM(path, data_type):
     return mappings
 
 
-def update_tables_gbq(pool, tables=[]):
-    """
-    This is the big file that pulls from the GBQ servers for the given
-    pool and requested tables
-    """
-    # bigquery strings -> python
-    proj_id = "uniswap-labs"
-    db = "on_chain_events"
-    client = bigquery.Client(project=proj_id)
-
-    tableToDB = {
-        "uniswap-labs.on_chain_events.uniswap_v3_factory_pool_created_events_combined": "factory_pool_created",
-        "uniswap-labs.on_chain_events.uniswap_v3_pool_swap_events_combined": "pool_swap_events",
-        "uniswap-labs.on_chain_events.uniswap_v3_pool_mint_burn_events_combined": "pool_mint_burn_events",
-        "uniswap-labs.on_chain_events.uniswap_v3_pool_initialize_events_combined": "pool_initialize_events",
-    }
-
+def _update_tables(pool, tables=[]):
     if tables == []:
         tables = pool.tables
 
     for table in tables:
         print(f"Starting table {table}")
-        gbq_table = f"{proj_id}.{db}.{table}"
-
-        data_type = tableToDB[gbq_table]
-        checkPath(data_type, pool.data_path)
+        checkPath(table, pool.data_path)
 
         # max row in gbq and min row in gbq
         max_block, min_block_of_segment = checkGlobalMinMaxBlock(
@@ -152,12 +132,12 @@ def update_tables_gbq(pool, tables=[]):
         print(f"Found {min_block_of_segment} to {max_block}")
 
         # check if we already have data
-        header = getHeader(data_type, pool.data_path)
+        header = getHeader(table, pool.data_path)
         # we already have existing data, so lets get the bn to only append new stuff
         if header != 0:
             print(f"Found data")
             found_min_block_of_segment = (
-                pl.scan_parquet(f"{pool.path}/{data_type}/*.parquet")
+                pl.scan_parquet(f"{pool.path}/{table}/*.parquet")
                 .filter(pl.col("chain_name") == pool.chain)
                 .select("block_number")
                 .max()
@@ -193,14 +173,13 @@ def update_tables_gbq(pool, tables=[]):
                 pool.connector,
                 max_block_of_segment,
                 min_block_of_segment,
-                client,
                 pool.chain,
             )
 
             # save it down
             writeDataset(
                 df,
-                data_type,
+                table,
                 pool.data_path,
                 max_block_of_segment,
                 min_block_of_segment,
@@ -232,7 +211,7 @@ def update_tables_gbq(pool, tables=[]):
                     .cast({"block_number": pl.Int64})
                 )
 
-                if data_type in [
+                if table in [
                     "pool_swap_events",
                     "pool_mint_burn_events",
                     "pool_initialize_events",
@@ -243,7 +222,7 @@ def update_tables_gbq(pool, tables=[]):
                         address=pl.col("address").map_dict(mapping, default=None)
                     )
 
-                elif data_type in ["factory_pool_created"]:
+                elif table in ["factory_pool_created"]:
                     df = df.with_columns(
                         # ovm changed contract addresses from ovm1 to ovm2
                         # we map this back for us
@@ -251,7 +230,7 @@ def update_tables_gbq(pool, tables=[]):
                     )
 
                 # we index the optimism chain by backloading all the ovm1 data as optimism at block 0
-                writeDataset(df, data_type, pool.data_path, 0, 0)
+                writeDataset(df, table, pool.data_path, 0, 0)
 
             # this moves the iteration, we pulled all of block n, so we want to start at n+1
             min_block_of_segment = max_block_of_segment + 1
@@ -272,10 +251,9 @@ def update_tables(pool, update_from, tables=[]):
     if update_from == "gcp":
         assert not gcp_locked, "GCP could not be imported"
         pool.connector = gbq()
-
-        update_tables_gbq(pool, tables)
+        _update_tables(pool, tables)
 
     elif update_from == "cryo":
-        update_tables_cryo(pool, tables)
+        _update_tables(pool, tables)
     else:
         raise NotImplementedError("Data puller not implimented")

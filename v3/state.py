@@ -54,12 +54,13 @@ class v3Pool:
         # we strip the "uniswap_v3_factory"
         # and "uniswap_v3_pool" bc its unneeded
         self.tables = [
-            "uniswap_v3_factory_pool_created_events_combined",
-            "uniswap_v3_pool_swap_events_combined",
-            "uniswap_v3_pool_mint_burn_events_combined",
-            "uniswap_v3_pool_initialize_events_combined",
+            "factory_pool_created",
+            "pool_swap_events",
+            "pool_mint_burn_events",
+            "pool_initialize_events",
         ]
 
+        self.connector = None
         # data quality assurances
         self.max_supported = -1
 
@@ -80,7 +81,7 @@ class v3Pool:
                     self.chain = "optimism"
 
         self.ts, self.fee, self.token0, self.token1 = initializePoolFromFactory(
-            pool, self.chain, self.data_path
+            self.pool, self.chain, self.data_path
         )
 
         if pull:

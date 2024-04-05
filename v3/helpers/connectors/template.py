@@ -2,35 +2,38 @@ import polars as pl
 import os
 from datetime import date, timedelta, datetime, timezone
 
-gcp_locked = True
-try:
-    from google.cloud import bigquery
 
-    gcp_locked = False
-except ImportError:
-    print("Unable to import GCP")
+class connector_template:
+    '''
+    this connector returns the query then executes the query
+    
+    the return type of the execute needs to be a polars dataframe
+    '''
 
-
-class gbq:
     def __init__(self):
-        self.proj_id = "uniswap-labs"
-        self.db = "on_chain_events"
-
-        self.client = bigquery.Client(project=self.proj_id)
-
-        self.remote_tables = {
-            "factory_pool_created": "uniswap_v3_factory_pool_created_events_combined",
-            "pool_swap_events": "uniswap_v3_pool_swap_events_combined",
-            "pool_mint_burn_events": "uniswap_v3_pool_mint_burn_events_combined",
-            "pool_initialize_events": "uniswap_v3_pool_initialize_events_combined",
-        }
+        pass
 
     def get_remote_table(self, table):
-        return f"{self.proj_id}.{self.db}.{self.remote_tables[table]}"
+        """
+        map the local name for the event to the desired global table
+
+        "factory_pool_created" -> remote database
+        "pool_swap_events",
+        "pool_mint_burn_events",
+        "pool_initialize_events",
+        """
+        pass
 
     def minMax(self, *args):
         """
         We want to find the bounds of the remote database
+
+        This is the min and max to iterate over for updating.
+        min block is overridden to the local min block later
+
+        needs to get out
+
+        return df["max_block"].item(), df["min_block"].item()
         """
         table, chain = args
         table = self.get_remote_table(table)
@@ -45,8 +48,14 @@ class gbq:
 
     def findSegment(self, *args):
         """
-        We want to find the smallest block such that we are pulling
-        around the tgt_max_rows number of rows from GBQ
+        We want to only pull a customizable amount of rows to ensure there are
+        no issues with memory/time outs.
+
+        Probably can be optimized a bunch
+
+        needs to get out
+        
+        return df.item() 
         """
         table, min_block, chain, tgt_max_rows = args
         table = self.get_remote_table(table)
@@ -56,18 +65,21 @@ class gbq:
                     select * 
                     from (
                         select block_number
-                         FROM `{table}`
+                        FROM `{table}`
                         where chain_name = '{chain}'
                         and block_number >= {min_block}
                         order by block_timestamp asc
                     ) limit {tgt_max_rows}
                 )
             """
+
         return q
 
     def readRemote(self, *args):
         """
         Pull from internal GBQ data lake
+
+        returns a dataframe of polars
         """
         table, max_block_of_segment, min_block_of_segment, chain = args
         table = self.get_remote_table(table)
@@ -82,6 +94,9 @@ class gbq:
         return q
 
     def get_template(self, query_type, *args):
+        """
+        take the query type and pass the args to the right func
+        """
         if query_type == "minMax":
             return self.minMax(*args)
         elif query_type == "findSegment":
@@ -92,7 +107,10 @@ class gbq:
             raise ValueError("Missing table definition")
 
     def execute(self, q):
-        print("execute")
+        """
+        Take the query and actually execute it
+        and get the polars df return
+        """
         query_job = self.client.query(q)  # API request
         rows = query_job.result()  # Waits for query to finish
 
