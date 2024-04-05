@@ -79,7 +79,7 @@ class v3Pool:
 
         
         self.ts, self.fee, self.token0, self.token1 = initializePoolFromFactory(
-            pool, self.chain, self.data_path
+            self.pool, self.chain, self.data_path
         )
 
         if pull:
