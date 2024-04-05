@@ -1,13 +1,16 @@
 import polars as pl
 import os
 from datetime import date, timedelta, datetime, timezone
+from .connectors import *
 
 gcp_locked = True
 try:
     from google.cloud import bigquery
+
     gcp_locked = False
 except ImportError:
     print("Unable to import GCP")
+
 
 # data updating
 def checkPath(data_type, data_path):
@@ -19,16 +22,18 @@ def checkPath(data_type, data_path):
     if not os.path.exists(path):
         os.mkdir(path)
 
+
 def isDS_Store(f):
     """
-    All my homies hate the .DS_Store, so we check 
+    All my homies hate the .DS_Store, so we check
     if the file is .DS_Store before iterating over files
     """
     return f != ".DS_Store"
 
+
 def getHeader(table, data_path):
     """
-    Returns an increasing number that will ensure that there 
+    Returns an increasing number that will ensure that there
     are no collisions. Pulls that number from the files and
     then adds 1 to it.
     """
@@ -58,66 +63,43 @@ def writeDataset(df, data_type, data_path, max_block_of_segment, min_block_of_se
     )
 
 
-def readGBQ(gbq_table, max_block_of_segment, min_block_of_segment, client, chain):
+def readRemote(
+    table, connector, max_block_of_segment, min_block_of_segment, client, chain
+):
     """
-    Pull from internal GBQ data lake
+    Read the raw dataframe from remote
     """
-    q = f"""select * 
-        FROM `{gbq_table}` 
-        WHERE chain_name = '{chain}'
-        AND block_number <= {max_block_of_segment}
-        AND block_number >= {min_block_of_segment}
-        """
-
-    query_job = client.query(q)  # API request
-    rows = query_job.result()  # Waits for query to finish
-
-    df = pl.from_arrow(rows.to_arrow())
+    q = connector.get_template(
+        "read", table, max_block_of_segment, min_block_of_segment, chain
+    )
+    df = connector.execute(q)
 
     return df
 
 
-def checkMinMaxBlock(gbq_table, client, chain):
+def checkGlobalMinMaxBlock(table, connector, chain):
     """
     Find the max and min row in the database to pull over
     """
-    # read the first entry
-    q = f"""select min(block_number) as min_block,
-                   max(block_number) as max_block,
-                   FROM `{gbq_table}` 
-                   where chain_name = '{chain}'
-         """
-    query_job = client.query(q)  # API request
-    rows = query_job.result()  # Waits for query to finish
 
-    df = pl.from_arrow(rows.to_arrow())
+    # read the first entry
+    q = connector.get_template("minMax", table, chain)
+    df = connector.execute(q)
+
     return df["max_block"].item(), df["min_block"].item()
 
 
-def findSegment(gbq_table, min_block, client, chain, tgt_max_rows):
+def findSegment(table, connector, min_block, chain, tgt_max_rows):
     """
     We want to find the smallest block such that we are pulling
     around the tgt_max_rows number of rows from GBQ
     """
-    q = f"""select max(block_number)
-            from (
-                select * 
-                  from (
-                    select block_number
-                    FROM `{gbq_table}` 
-                    where chain_name = '{chain}'
-                    and block_number >= {min_block}
-                    order by block_timestamp asc
-                  ) limit {tgt_max_rows}
-            )
-         """
 
-    query_job = client.query(q)  # API request
-    rows = query_job.result()  # Waits for query to finish
-
-    df = pl.from_arrow(rows.to_arrow())
+    q = connector.get_template("findSegment", table, min_block, chain, tgt_max_rows)
+    df = connector.execute(q)
 
     return df.item()
+
 
 def readOVM(path, data_type):
     """
@@ -135,6 +117,7 @@ def readOVM(path, data_type):
 
     return mappings
 
+
 def update_tables_gbq(pool, tables=[]):
     """
     This is the big file that pulls from the GBQ servers for the given
@@ -143,7 +126,7 @@ def update_tables_gbq(pool, tables=[]):
     # bigquery strings -> python
     proj_id = "uniswap-labs"
     db = "on_chain_events"
-    client = bigquery.Client(project = proj_id)
+    client = bigquery.Client(project=proj_id)
 
     tableToDB = {
         "uniswap-labs.on_chain_events.uniswap_v3_factory_pool_created_events_combined": "factory_pool_created",
@@ -163,8 +146,8 @@ def update_tables_gbq(pool, tables=[]):
         checkPath(data_type, pool.data_path)
 
         # max row in gbq and min row in gbq
-        max_block, min_block_of_segment = checkMinMaxBlock(
-            gbq_table, client, pool.chain
+        max_block, min_block_of_segment = checkGlobalMinMaxBlock(
+            table, pool.connector, pool.chain
         )
         print(f"Found {min_block_of_segment} to {max_block}")
 
@@ -196,17 +179,18 @@ def update_tables_gbq(pool, tables=[]):
             # the finds the max block of the segment
             # which is the max block that returns close to the target amount of rows to pull from gbq
             max_block_of_segment = findSegment(
-                gbq_table,
+                table,
+                pool.connector,
                 min_block_of_segment,
-                client,
                 pool.chain,
                 pool.tgt_max_rows,
             )
 
             print(f"Going from {min_block_of_segment} to {max_block_of_segment}")
-            # read that segment in from gbq
-            df = readGBQ(
-                gbq_table,
+            # read that segment in from remote
+            df = readRemote(
+                table,
+                pool.connector,
                 max_block_of_segment,
                 min_block_of_segment,
                 client,
@@ -283,11 +267,15 @@ def update_tables_cryo(pool, tables=[]):
     # TODO
     raise NotImplementedError("Cryo is not yet implimented")
 
+
 def update_tables(pool, update_from, tables=[]):
-    if update_from == 'gcp':
+    if update_from == "gcp":
         assert not gcp_locked, "GCP could not be imported"
+        pool.connector = gbq()
+
         update_tables_gbq(pool, tables)
-    elif update_from == 'cryo':
+
+    elif update_from == "cryo":
         update_tables_cryo(pool, tables)
     else:
         raise NotImplementedError("Data puller not implimented")
