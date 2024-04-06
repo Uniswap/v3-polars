@@ -184,8 +184,6 @@ def _update_tables(pool, tables=[], test_mode=False):
             print(f"Starting at {min_block_of_segment}")
             # the finds the max block of the segment
             # which is the max block that returns close to the target amount of rows to pull from gbq
-            # TODO
-            # pass max block to cut off intentional desyncs from remote
             max_block_of_segment = findSegment(
                 table,
                 pool.connector,
