@@ -4,11 +4,11 @@ from datetime import date, timedelta, datetime, timezone
 
 
 class connector_template:
-    '''
+    """
     this connector returns the query then executes the query
-    
+
     the return type of the execute needs to be a polars dataframe
-    '''
+    """
 
     def __init__(self):
         pass
@@ -60,7 +60,7 @@ class connector_template:
         Probably can be optimized a bunch
 
         needs to get out:
-        one column (any column name works because item unfurls it) 
+        one column (any column name works because item unfurls it)
         return the block where there exists 1m rows below it
 
         NOTE: we cant unfurl this right now in the query because
@@ -69,7 +69,7 @@ class connector_template:
         # in date_update.py
         return df.item()
         """
-        table, min_block, chain, tgt_max_rows = args
+        table, max_block, min_block, chain, tgt_max_rows = args
         table = self.get_remote_table(table)
 
         q = f"""select max(block_number)
@@ -80,6 +80,7 @@ class connector_template:
                         FROM `{table}`
                         where chain_name = '{chain}'
                         and block_number >= {min_block}
+                        and block_number <= {max_block}
                         order by block_timestamp asc
                     ) limit {tgt_max_rows}
                 )
@@ -94,10 +95,10 @@ class connector_template:
         returns a dataframe of polars with the desired row schema
         the schemas can be found in data/examples/{table}
 
-        NOTE: generally these look like 
+        NOTE: generally these look like
         events with block info + tx index + gas costs
 
-        specific schemas can be found in those examples 
+        specific schemas can be found in those examples
 
         # in date_update.py
         return df

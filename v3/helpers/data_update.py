@@ -2,6 +2,8 @@ import polars as pl
 import os
 from datetime import date, timedelta, datetime, timezone
 from .connectors import *
+from .test_helpers import *
+from pathlib import Path
 
 gcp_locked = True
 try:
@@ -59,7 +61,8 @@ def writeDataset(df, table, data_path, max_block_of_segment, min_block_of_segmen
     """
     idx = getHeader(table, data_path)
     df.write_parquet(
-        f"{data_path}/{table}/{idx}_{min_block_of_segment}_{max_block_of_segment}_{table}.parquet"
+        f"{data_path}/{table}/{idx}_{min_block_of_segment}_{max_block_of_segment}_{table}.parquet",
+        statistics=True,
     )
 
 
@@ -88,13 +91,15 @@ def checkGlobalMinMaxBlock(table, connector, chain):
     return df["max_block"].item(), df["min_block"].item()
 
 
-def findSegment(table, connector, min_block, chain, tgt_max_rows):
+def findSegment(table, connector, max_block, min_block, chain, tgt_max_rows):
     """
     We want to find the smallest block such that we are pulling
     around the tgt_max_rows number of rows from GBQ
     """
 
-    q = connector.get_template("findSegment", table, min_block, chain, tgt_max_rows)
+    q = connector.get_template(
+        "findSegment", table, max_block, min_block, chain, tgt_max_rows
+    )
     df = connector.execute(q)
 
     return df.item()
@@ -117,8 +122,22 @@ def readOVM(path, data_type):
     return mappings
 
 
-def _update_tables(pool, tables=[]):
-    if tables == []:
+def _update_tables(pool, tables=[], test_mode=False):
+    if test_mode:
+        check_test_mode(pool)
+        pool.data_path = f"{pool.data_path}/test"
+        checkPath("", pool.data_path)
+
+        for p in Path(pool.data_path).iterdir():
+            if not p.is_dir():
+                continue
+            for x in p.iterdir():
+                x.unlink(missing_ok=True)
+
+        # 1000th swap on mainnet happened at this block
+        max_block = 12376625
+
+    if tables == [] or test_mode:
         tables = pool.tables
 
     for table in tables:
@@ -131,13 +150,18 @@ def _update_tables(pool, tables=[]):
         )
         print(f"Found {min_block_of_segment} to {max_block}")
 
+        if test_mode:
+            check_min_segment(min_block_of_segment, table)
+            print(f"Check remote max for table {table} is {max_block}")
+            max_block = 12376625
+
         # check if we already have data
         header = getHeader(table, pool.data_path)
         # we already have existing data, so lets get the bn to only append new stuff
         if header != 0:
             print(f"Found data")
             found_min_block_of_segment = (
-                pl.scan_parquet(f"{pool.path}/{table}/*.parquet")
+                pl.scan_parquet(f"{pool.data_path}/{table}/*.parquet")
                 .filter(pl.col("chain_name") == pool.chain)
                 .select("block_number")
                 .max()
@@ -148,7 +172,9 @@ def _update_tables(pool, tables=[]):
             if found_min_block_of_segment == None:
                 pass
             else:
+                assert not test_mode, "Found loaded test folder"
                 min_block_of_segment = found_min_block_of_segment + 1
+
             print(f"Updated to {min_block_of_segment} to {max_block}")
 
         iterations = 0
@@ -158,9 +184,12 @@ def _update_tables(pool, tables=[]):
             print(f"Starting at {min_block_of_segment}")
             # the finds the max block of the segment
             # which is the max block that returns close to the target amount of rows to pull from gbq
+            # TODO
+            # pass max block to cut off intentional desyncs from remote
             max_block_of_segment = findSegment(
                 table,
                 pool.connector,
+                max_block,
                 min_block_of_segment,
                 pool.chain,
                 pool.tgt_max_rows,
@@ -235,6 +264,9 @@ def _update_tables(pool, tables=[]):
             # this moves the iteration, we pulled all of block n, so we want to start at n+1
             min_block_of_segment = max_block_of_segment + 1
 
+            if test_mode:
+                break
+
         if iterations == 0:
             print("Nothing to update")
 
@@ -247,13 +279,13 @@ def update_tables_cryo(pool, tables=[]):
     raise NotImplementedError("Cryo is not yet implimented")
 
 
-def update_tables(pool, update_from, tables=[]):
+def update_tables(pool, update_from, tables=[], test_mode=False):
     if update_from == "gcp":
         assert not gcp_locked, "GCP could not be imported"
         pool.connector = gbq()
-        _update_tables(pool, tables)
+        _update_tables(pool, tables, test_mode)
 
     elif update_from == "cryo":
-        _update_tables(pool, tables)
+        _update_tables(pool, tables, test_mode)
     else:
         raise NotImplementedError("Data puller not implimented")

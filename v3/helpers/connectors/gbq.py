@@ -48,7 +48,7 @@ class gbq:
         We want to find the smallest block such that we are pulling
         around the tgt_max_rows number of rows from GBQ
         """
-        table, min_block, chain, tgt_max_rows = args
+        table, max_block, min_block, chain, tgt_max_rows = args
         table = self.get_remote_table(table)
 
         q = f"""select max(block_number)
@@ -56,13 +56,15 @@ class gbq:
                     select * 
                     from (
                         select block_number
-                         FROM `{table}`
+                        FROM `{table}`
                         where chain_name = '{chain}'
                         and block_number >= {min_block}
+                        and block_number <= {max_block}
                         order by block_timestamp asc
                     ) limit {tgt_max_rows}
                 )
             """
+
         return q
 
     def readRemote(self, *args):
@@ -92,7 +94,6 @@ class gbq:
             raise ValueError("Missing table definition")
 
     def execute(self, q):
-        print("execute")
         query_job = self.client.query(q)  # API request
         rows = query_job.result()  # Waits for query to finish
 
