@@ -15,6 +15,7 @@ class v3Pool:
         update=False,
         pull=True,
         tgt_max_rows=1_000_000,
+        test_mode=False,
     ):
         """
         Impliments and maintains a representation of Uniswap v3 Pool
@@ -47,8 +48,8 @@ class v3Pool:
         self.cache["as_of"] = 0
 
         # data checkers
-        self.path = f"{PACKAGEDIR}/data"
-        self.data_path = f"{PACKAGEDIR}/data"
+        self.path = str(Path(f"{PACKAGEDIR}/data").resolve())
+        self.data_path = str(Path(f"{PACKAGEDIR}/data").resolve())
         checkPath("", self.data_path)
 
         # we strip the "uniswap_v3_factory"
@@ -65,7 +66,7 @@ class v3Pool:
         self.max_supported = -1
 
         if update:
-            update_tables(self, update_from, self.tables)
+            update_tables(self, update_from, self.tables, test_mode)
 
             if self.chain == "optimism":
                 print("Chain = optimism - Start pulling the ovm1")
@@ -73,16 +74,21 @@ class v3Pool:
                 # pain
                 try:
                     self.chain = "optimism_legacy_ovm1"
-                    update_tables(self, update_from, self.tables)
+                    update_tables(self, update_from, self.tables, test_mode)
                 except Exception as e:
                     raise (e)
                 # we dont want these race condition
                 finally:
                     self.chain = "optimism"
+        else:
+            if test_mode:
+                raise ValueError("test_mode true but update false")
 
         self.ts, self.fee, self.token0, self.token1 = initializePoolFromFactory(
             self.pool, self.chain, self.data_path
         )
+        if test_mode:
+            test_assertion(self)
 
         if pull:
             self.readFromMemoryOrDisk("pool_swap_events", self.data_path, save=True)
