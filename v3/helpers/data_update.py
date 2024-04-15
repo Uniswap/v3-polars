@@ -1,7 +1,7 @@
 import polars as pl
 import os
 from datetime import date, timedelta, datetime, timezone
-from .connectors import *
+from .connectors import allium, gbq
 from .test_helpers import *
 from pathlib import Path
 
@@ -281,6 +281,10 @@ def update_tables(pool, update_from, tables=[], test_mode=False):
     if update_from == "gcp":
         assert not gcp_locked, "GCP could not be imported"
         pool.connector = gbq()
+        _update_tables(pool, tables, test_mode)
+
+    if update_from == "allium":
+        pool.connector = allium()
         _update_tables(pool, tables, test_mode)
 
     elif update_from == "cryo":
