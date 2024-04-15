@@ -14,7 +14,7 @@ class v3Pool:
         low_memory=False,
         update=False,
         pull=True,
-        tgt_max_rows=1_000_000,
+        tgt_max_rows=100_000,
         test_mode=False,
     ):
         """

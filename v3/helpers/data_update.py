@@ -4,6 +4,7 @@ from datetime import date, timedelta, datetime, timezone
 from .connectors import allium, gbq
 from .test_helpers import *
 from pathlib import Path
+import json
 
 gcp_locked = True
 try:
@@ -269,14 +270,6 @@ def _update_tables(pool, tables=[], test_mode=False):
             print("Nothing to update")
 
 
-def update_tables_cryo(pool, tables=[]):
-    """
-    sad
-    """
-    # TODO
-    raise NotImplementedError("Cryo is not yet implimented")
-
-
 def update_tables(pool, update_from, tables=[], test_mode=False):
     if update_from == "gcp":
         assert not gcp_locked, "GCP could not be imported"
@@ -284,10 +277,18 @@ def update_tables(pool, update_from, tables=[], test_mode=False):
         _update_tables(pool, tables, test_mode)
 
     if update_from == "allium":
-        pool.connector = allium()
+        assert pool.tgt_max_rows <= 100_000, "Attempting to pull too many rows"
+        
+        main = str(Path(f"{pool.data_path}/..").resolve())
+        with open(f"{main}/secrets.json", "r") as f:
+            secrets = json.load(f)
+
+        pool.connector = allium(secrets['allium_query_id'], secrets['allium_api_key'])
         _update_tables(pool, tables, test_mode)
 
     elif update_from == "cryo":
+
+        raise NotImplementedError("sad")
         _update_tables(pool, tables, test_mode)
     else:
         raise NotImplementedError("Data puller not implimented")

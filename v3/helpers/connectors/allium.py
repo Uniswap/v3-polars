@@ -3,8 +3,9 @@ import requests
 
 
 class allium:
-    def __init__(self):
-        pass
+    def __init__(self, allium_query_id, allium_api_key):
+        self.allium_query_id = allium_query_id
+        self.allium_api_key = allium_api_key
 
     def get_remote_table(self, table, chain):
 
@@ -199,12 +200,10 @@ class allium:
             raise ValueError("Missing table definition")
 
     def execute(self, q):
-        allium_query_id = ""
-        allium_api_key = ""
         response = requests.post(
-            f"https://api.allium.so/api/v1/explorer/queries/{allium_query_id}/run",
+            f"https://api.allium.so/api/v1/explorer/queries/{self.allium_query_id}/run",
             json={"query_text":q},
-            headers={"X-API-Key": allium_api_key},
+            headers={"X-API-Key": self.allium_api_key},
             timeout=240
         )
 
