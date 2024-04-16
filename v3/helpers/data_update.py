@@ -280,7 +280,10 @@ def update_tables(pool, update_from, tables=[], test_mode=False):
         assert pool.tgt_max_rows <= 100_000, "Attempting to pull too many rows"
         
         main = str(Path(f"{pool.data_path}/..").resolve())
-        with open(f"{main}/secrets.json", "r") as f:
+        secrets = f"{main}/secrets.json"
+       
+        assert os.path.exists(secrets), "Please provide secrets.json for API keys"
+        with open(secrets, "r") as f:
             secrets = json.load(f)
 
         pool.connector = allium(secrets['allium_query_id'], secrets['allium_api_key'])

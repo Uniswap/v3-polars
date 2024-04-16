@@ -11,8 +11,43 @@
 
 ### GIF created using v3-polars
 ![](./assets/animation.gif)
-### Simple examples
 
+### Data Providers
+If you are an academic writing a paper, feel free to reach out to <a href="https://twitter.com/AustinAdams10">Austin</a>
+
+#### Allium
+The wonderful folks at <a href ="https://allium.so/">Allium</a> have integrated with v3-polars as part of their <a href="https://x.com/UniswapFND/status/1776002168681529549">DEX Analytics Portal grant</a>
+
+Please create a `secrets.json` and place it inside v3/ with the formatting below.
+
+To generate the required data
+
+1. Login to app.allium.so and create an explorer query
+2. Place only {{query_text}} in the query
+3. Click "save" on the top right, then "export to api"
+4. Here, you will get the query id and api key
+5. Place these into the secrets.json file
+
+```python
+{'allium_query_id': "",
+'allium_api_key': ""}
+```
+
+#### Google BigQuery
+To use the GBQ database, you need to be auth'd with Uniswap Labs backend. 
+Likely, if you don't know how to do this, then you should use another provider.
+
+However, if you think you should be auth'd and are not, run the code below
+
+```bash
+gcloud auth login
+```
+
+#### Your provider
+Create a new connector in v3/helpers/connectors using template.py.
+Integrate your connector into data_update.py under update_tables and make a PR!
+
+### Simple examples
 
 Pull and then read all ETH/USDC swaps on Arbitrum
 ```python
