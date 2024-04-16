@@ -278,19 +278,18 @@ def update_tables(pool, update_from, tables=[], test_mode=False):
 
     if update_from == "allium":
         assert pool.tgt_max_rows <= 100_000, "Attempting to pull too many rows"
-        
+
         main = str(Path(f"{pool.data_path}/..").resolve())
         secrets = f"{main}/secrets.json"
-       
+
         assert os.path.exists(secrets), "Please provide secrets.json for API keys"
         with open(secrets, "r") as f:
             secrets = json.load(f)
 
-        pool.connector = allium(secrets['allium_query_id'], secrets['allium_api_key'])
+        pool.connector = allium(secrets["allium_query_id"], secrets["allium_api_key"])
         _update_tables(pool, tables, test_mode)
 
     elif update_from == "cryo":
-
         raise NotImplementedError("sad")
         _update_tables(pool, tables, test_mode)
     else:

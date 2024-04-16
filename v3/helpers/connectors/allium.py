@@ -8,10 +8,9 @@ class allium:
         self.allium_api_key = allium_api_key
 
     def get_remote_table(self, table, chain):
-
         # which chains are layer 2s (to get the l1 fee)
         layer_2s = ["base", "arbitrum", "optimism"]
-        
+
         # translate uniswap chain names to allium chain names
         uniswap_to_allium_name_mapping = {
             "ethereum": "ethereum",
@@ -22,7 +21,9 @@ class allium:
         }
         allium_chain_name = uniswap_to_allium_name_mapping.get(chain, None)
         if allium_chain_name is None:
-            raise ValueError(f"Chain {chain} not supported in the allium adapter, please update uniswap_to_allium_name_mapping.")
+            raise ValueError(
+                f"Chain {chain} not supported in the allium adapter, please update uniswap_to_allium_name_mapping."
+            )
 
         if table == "factory_pool_created":
             query = f"""
@@ -198,25 +199,32 @@ class allium:
     def execute(self, q):
         response = requests.post(
             f"https://api.allium.so/api/v1/explorer/queries/{self.allium_query_id}/run",
-            json={"query_text":q},
+            json={"query_text": q},
             headers={"X-API-Key": self.allium_api_key},
-            timeout=240
+            timeout=240,
         )
 
         # polars from dict
-        df = pl.DataFrame(response.json()['data'])
+        df = pl.DataFrame(response.json()["data"])
 
         # api doesn't deal with camel case out of the box
-        column_renames = {"tick_spacing": "tickSpacing", "sqrt_price_x96": "sqrtPriceX96"}
+        column_renames = {
+            "tick_spacing": "tickSpacing",
+            "sqrt_price_x96": "sqrtPriceX96",
+        }
         for original, new in column_renames.items():
             if original in df.columns:
                 df = df.rename({original: new})
 
         # convert block_timestamp from string like '2024-04-02 12:21:33' to datetime
         if "block_timestamp" in df.columns:
-            df = df.with_columns(df["block_timestamp"].str.to_datetime().dt.replace_time_zone("UTC"))
+            df = df.with_columns(
+                df["block_timestamp"].str.to_datetime().dt.replace_time_zone("UTC")
+            )
 
-        if len(df)>=100_000:
-            raise Exception("Tried to fetch please fetch at most 100,000 rows at a time")
+        if len(df) >= 100_000:
+            raise Exception(
+                "Tried to fetch please fetch at most 100,000 rows at a time"
+            )
 
         return df
