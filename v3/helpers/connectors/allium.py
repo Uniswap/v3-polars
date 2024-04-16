@@ -41,7 +41,6 @@ class allium:
                 from {allium_chain_name}.dex.pools
                 where 1=1
                     and protocol='uniswap_v3'
-                    and block_timestamp<='2023-01-01'
             )
             """
         elif table == "pool_swap_events":
@@ -72,7 +71,6 @@ class allium:
                 where 1=1
                     and t1.event='swap'
                     and t1.protocol='uniswap_v3'
-                    and t1.block_timestamp<='2023-01-01'
             )
             """
         elif table == "pool_mint_burn_events":
@@ -103,7 +101,6 @@ class allium:
                 inner join {allium_chain_name}.raw.transactions t2 on t1.transaction_hash=t2.hash and t1.block_timestamp=t2.block_timestamp
                 where 1=1
                     and protocol='uniswap_v3'
-                    and t1.block_timestamp<='2023-01-01'
                     and event in ('mint', 'burn')
             )
             """
@@ -128,7 +125,6 @@ class allium:
                 inner join {allium_chain_name}.raw.transactions t2 on t1.transaction_hash=t2.hash and t1.block_timestamp=t2.block_timestamp
                 where 1=1
                     and t1.topic0='0x98636036cb66a9c19a37435efc1e90142190214e8abeb821bdba3f2990dd4c95'
-                    and t1.block_timestamp<='2023-01-01'
             )
             """
         else:
