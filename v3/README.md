@@ -23,7 +23,6 @@ The function `readFromMemoryOrDisk` intakes a parquet (as components of a filepa
 |       l1_fee      | i64             |
 
 **Mint & Burn**
-
 | Column            | Polars datatype |
 |-------------------|-----------------|
 |     chain_name    | str             |
