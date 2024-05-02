@@ -138,10 +138,10 @@ class v3Pool:
                             "amount1":pl.Float64,
                             "sqrtPriceX96":pl.Float64,
                             "liquidity":pl.Float64,
-                            "tick":pl.Float64,
-                            "gas_price":pl.Float64,
-                            "gas_used":pl.Float64,
-                            "l1_fee":pl.Float64
+                            "tick":pl.Int32, # tick in v3 is int24
+                            "gas_price":pl.Int64,
+                            "gas_used":pl.Int64,
+                            "l1_fee":pl.Int64
                         }
                     )
                     .collect()
@@ -172,10 +172,9 @@ class v3Pool:
                             "block_timestamp":pl.Datetime,
                             "amount0":pl.Float64,
                             "amount1":pl.Float64,
-                            "sqrtPriceX96":pl.Float64,
-                            "gas_price":pl.Float64,
-                            "gas_used":pl.Float64,
-                            "l1_fee":pl.Float64
+                            "gas_price":pl.Int64,
+                            "gas_used":pl.Int64,
+                            "l1_fee":pl.Int64
                         }
                     )
                     .with_columns(
