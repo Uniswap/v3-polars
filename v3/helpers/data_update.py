@@ -63,7 +63,6 @@ def writeDataset(df, table, data_path, max_block_of_segment, min_block_of_segmen
     idx = getHeader(table, data_path)
     df.write_parquet(
         f"{data_path}/{table}/{idx}_{min_block_of_segment}_{max_block_of_segment}_{table}.parquet",
-        statistics=True,
     )
 
 
