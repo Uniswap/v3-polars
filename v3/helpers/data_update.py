@@ -275,7 +275,7 @@ def update_tables(pool, update_from, tables=[], test_mode=False):
         pool.connector = gbq()
         _update_tables(pool, tables, test_mode)
 
-    if update_from == "allium":
+    elif update_from == "allium":
         assert pool.tgt_max_rows <= 100_000, "Attempting to pull too many rows"
 
         main = str(Path(f"{pool.data_path}/..").resolve())
