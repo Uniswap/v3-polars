@@ -40,8 +40,7 @@ class allium:
                     tick_spacing as "tick_spacing", -- will be renamed to camel case
                     liquidity_pool_address as "pool"
                 from {allium_chain_name}.dex.pools
-                where 1=1
-                    and protocol='uniswap_v3'
+                where 1=1 and protocol='uniswap_v3'
             )
             """
         elif table == "pool_swap_events":
@@ -55,7 +54,7 @@ class allium:
                     t1.transaction_hash as "transaction_hash",
                     t1.log_index as "log_index",
                     t1.sender_address as "sender",
-                    t1.to_address as "recipient",
+                    t1.recipient_address as "recipient",
                     t1.token0_amount as "amount0",
                     t1.token1_amount as "amount1",
                     t1.sqrt_price_x96 as "sqrt_price_x96", -- will be renamed to camel case
@@ -63,15 +62,15 @@ class allium:
                     t1.tick as "tick",
                     t1.transaction_to_address as "to_address",
                     t1.transaction_from_address as "from_address",
-                    t2.transaction_index as "transaction_index",
-                    t2.gas_price as "gas_price",
-                    t2.gas as "gas_used",
-                    {'null' if allium_chain_name not in layer_2s else 't2.receipt_l1_fee'} as "l1_fee"
-                from {allium_chain_name}.dex.events t1
-                inner join {allium_chain_name}.raw.transactions t2 on t1.transaction_hash=t2.hash and t1.block_timestamp=t2.block_timestamp
-                where 1=1
-                    and t1.event='swap'
-                    and t1.protocol='uniswap_v3'
+                    t1.transaction_index as "transaction_index",
+                    coalesce(
+                        t1.fee_details['receipt_effective_gas_price']::varchar,
+                        t1.fee_details['gas_price']::varchar
+                    )::varchar as "gas_price",
+                    t1.fee_details['receipt_gas_used']::varchar as "gas_used",
+                    t1.fee_details['receipt_l1_fee']::varchar as "l1_fee"
+                from {allium_chain_name}.dex.uniswap_v3_events t1
+                where 1=1 and t1.event='swap'
             )
             """
         elif table == "pool_mint_burn_events":
@@ -88,21 +87,21 @@ class allium:
                     t1.liquidity as "amount",
                     t1.token0_amount as "amount0",
                     t1.token1_amount as "amount1",
-                    t1.to_address as "owner",
+                    t1.owner_address as "owner",
                     t1.tick_lower as "tick_lower",
                     t1.tick_upper as "tick_upper",
                     case when t1.event='mint' then 1 else -1 end as "type_of_event",
                     t1.transaction_to_address as "to_address",
                     t1.transaction_from_address as "from_address",
-                    t2.transaction_index as "transaction_index",
-                    t2.gas_price as "gas_price",
-                    t2.gas as "gas_used",
-                    {'null' if allium_chain_name not in layer_2s else 't2.receipt_l1_fee'} as "l1_fee"
-                from {allium_chain_name}.dex.events t1
-                inner join {allium_chain_name}.raw.transactions t2 on t1.transaction_hash=t2.hash and t1.block_timestamp=t2.block_timestamp
-                where 1=1
-                    and protocol='uniswap_v3'
-                    and event in ('mint', 'burn')
+                    t1.transaction_index as "transaction_index",
+                    coalesce(
+                        t1.fee_details['receipt_effective_gas_price']::varchar,
+                        t1.fee_details['gas_price']::varchar
+                    )::varchar as "gas_price",
+                    t1.fee_details['receipt_gas_used']::varchar as "gas_used",
+                    t1.fee_details['receipt_l1_fee']::varchar as "l1_fee"
+                from {allium_chain_name}.dex.uniswap_v3_events t1
+                where 1=1 and event in ('mint', 'burn')
             )
             """
         elif table == "pool_initialize_events":
@@ -110,22 +109,24 @@ class allium:
             (
                 select
                     '{chain}' as "chain_name",
-                    t1.address as "address",
+                    t1.liquidity_pool_address as "address",
                     t1.block_timestamp as "block_timestamp",
                     t1.block_number as "block_number",
                     t1.transaction_hash as "transaction_hash",
                     t1.log_index as "log_index",
-                    t1.params['sqrtPriceX96']::varchar as "sqrt_price_x96", -- will be renamed to camel case    
-                    t1.params['tick']::varchar as "tick",
+                    t1.sqrt_price_x96 as "sqrt_price_x96", -- will be renamed to camel case    
+                    t1.tick as "tick",
                     t1.transaction_to_address as "to_address",
                     t1.transaction_from_address as "from_address",
                     t1.transaction_index as "transaction_index",
-                    t2.gas_price as "gas_price",
-                    t2.gas as "gas_used"
-                from {allium_chain_name}.decoded.logs t1
-                inner join {allium_chain_name}.raw.transactions t2 on t1.transaction_hash=t2.hash and t1.block_timestamp=t2.block_timestamp
-                where 1=1
-                    and t1.topic0='0x98636036cb66a9c19a37435efc1e90142190214e8abeb821bdba3f2990dd4c95'
+                    coalesce(
+                        t1.fee_details['receipt_effective_gas_price']::varchar,
+                        t1.fee_details['gas_price']::varchar
+                    )::varchar as "gas_price",
+                    t1.fee_details['receipt_gas_used']::varchar as "gas_used",
+                    t1.fee_details['receipt_l1_fee']::varchar as "l1_fee"
+                from {allium_chain_name}.dex.uniswap_v3_events t1
+                where 1=1 and event = 'initialize'
             )
             """
         else:
