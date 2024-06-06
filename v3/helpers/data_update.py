@@ -1,18 +1,10 @@
 import polars as pl
 import os
 from datetime import date, timedelta, datetime, timezone
-from .connectors import *
+from .connectors import allium, gbq
 from .test_helpers import *
 from pathlib import Path
-
-gcp_locked = True
-try:
-    from google.cloud import bigquery
-
-    gcp_locked = False
-except ImportError:
-    print("Unable to import GCP")
-
+import json
 
 # data updating
 def checkPath(data_type, data_path):
@@ -62,7 +54,6 @@ def writeDataset(df, table, data_path, max_block_of_segment, min_block_of_segmen
     idx = getHeader(table, data_path)
     df.write_parquet(
         f"{data_path}/{table}/{idx}_{min_block_of_segment}_{max_block_of_segment}_{table}.parquet",
-        statistics=True,
     )
 
 
@@ -88,6 +79,7 @@ def checkGlobalMinMaxBlock(table, connector, chain):
     q = connector.get_template("minMax", table, chain)
     df = connector.execute(q)
 
+    print(df)
     return df["max_block"].item(), df["min_block"].item()
 
 
@@ -269,21 +261,31 @@ def _update_tables(pool, tables=[], test_mode=False):
             print("Nothing to update")
 
 
-def update_tables_cryo(pool, tables=[]):
-    """
-    sad
-    """
-    # TODO
-    raise NotImplementedError("Cryo is not yet implimented")
-
-
 def update_tables(pool, update_from, tables=[], test_mode=False):
     if update_from == "gcp":
-        assert not gcp_locked, "GCP could not be imported"
+        gcp_locked = True
+        try:
+            from google.cloud import bigquery
+            gcp_locked = False
+        except ImportError:
+            raise Exception("GCP could not be imported. If you want to use another source (such as allium), set update_from to the desired source e.g. 'allium'")
+        
         pool.connector = gbq()
         _update_tables(pool, tables, test_mode)
 
-    elif update_from == "cryo":
+    elif update_from == "allium":
+        assert pool.tgt_max_rows <= 200_000, "Attempting to pull too many rows (>200k), set tgt_max_rows to less than 100k rows"
+
+        allium_query_id = os.getenv("ALLIUM_POLARSV3_QUERY_ID")
+        allium_api_key = os.getenv("ALLIUM_POLARSV3_API_KEY")
+
+        assert allium_query_id and allium_api_key, "Please set ALLIUM_POLARSV3_QUERY_ID and ALLIUM_POLARSV3_API_KEY environment variables"
+
+        pool.connector = allium(allium_query_id, allium_api_key)
         _update_tables(pool, tables, test_mode)
+
+    elif update_from == "cryo":
+        raise NotImplementedError("sad")
+        # _update_tables(pool, tables, test_mode)
     else:
-        raise NotImplementedError("Data puller not implimented")
+        raise NotImplementedError("Data puller not implemented")
