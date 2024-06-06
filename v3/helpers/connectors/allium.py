@@ -204,9 +204,16 @@ class allium:
             headers={"X-API-Key": self.allium_api_key},
             timeout=240,
         )
+        
+        response_json = response.json()
 
+        data = response_json.get("data")
+
+        if not data:
+            raise Exception(f"No data returned from Allium query {q}, query response: {response_json}")
+        
         # polars from dict
-        df = pl.DataFrame(response.json()["data"])
+        df = pl.DataFrame(data)
 
         # api doesn't deal with camel case out of the box
         column_renames = {
@@ -223,9 +230,9 @@ class allium:
                 df["block_timestamp"].str.to_datetime().dt.replace_time_zone("UTC")
             )
 
-        if len(df) >= 100_000:
+        if len(df) >= 200_000:
             raise Exception(
-                "Tried to fetch please fetch at most 100,000 rows at a time"
+                "Please fetch at most 200,000 rows at a time"
             )
 
         return df
