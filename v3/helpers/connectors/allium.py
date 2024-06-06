@@ -55,7 +55,7 @@ class allium:
                     t1.transaction_hash as "transaction_hash",
                     t1.log_index as "log_index",
                     t1.sender_address as "sender",
-                    t1.to_address as "recipient",
+                    t1.recipient_address as "recipient",
                     t1.token0_amount as "amount0",
                     t1.token1_amount as "amount1",
                     t1.sqrt_price_x96 as "sqrt_price_x96", -- will be renamed to camel case
@@ -88,7 +88,7 @@ class allium:
                     t1.liquidity as "amount",
                     t1.token0_amount as "amount0",
                     t1.token1_amount as "amount1",
-                    t1.to_address as "owner",
+                    t1.owner_address as "owner",
                     t1.tick_lower as "tick_lower",
                     t1.tick_upper as "tick_upper",
                     case when t1.event='mint' then 1 else -1 end as "type_of_event",
@@ -203,9 +203,16 @@ class allium:
             headers={"X-API-Key": self.allium_api_key},
             timeout=240,
         )
+        
+        response_json = response.json()
 
+        data = response_json.get("data")
+
+        if not data:
+            raise Exception(f"No data returned from Allium query {q}, query response: {response_json}")
+        
         # polars from dict
-        df = pl.DataFrame(response.json()["data"])
+        df = pl.DataFrame(data)
 
         # api doesn't deal with camel case out of the box
         column_renames = {
@@ -222,9 +229,9 @@ class allium:
                 df["block_timestamp"].str.to_datetime().dt.replace_time_zone("UTC")
             )
 
-        if len(df) >= 100_000:
+        if len(df) >= 200_000:
             raise Exception(
-                "Tried to fetch please fetch at most 100,000 rows at a time"
+                "Please fetch at most 200,000 rows at a time"
             )
 
         return df

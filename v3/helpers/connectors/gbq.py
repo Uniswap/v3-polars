@@ -2,13 +2,13 @@ import polars as pl
 import os
 from datetime import date, timedelta, datetime, timezone
 
-gcp_locked = True
-try:
-    from google.cloud import bigquery
+def get_gbq_client(proj_id):
+    try:
+        from google.cloud import bigquery
 
-    gcp_locked = False
-except ImportError:
-    print("Unable to import GCP")
+        return bigquery.Client(project=proj_id)
+    except ImportError:
+        raise Exception("GCP could not be imported. If you want to use another source (such as allium), set update_from to the desired source e.g. 'allium'")
 
 
 class gbq:
@@ -16,7 +16,7 @@ class gbq:
         self.proj_id = "uniswap-labs"
         self.db = "on_chain_events"
 
-        self.client = bigquery.Client(project=self.proj_id)
+        self.client = get_gbq_client(self.proj_id)
 
         self.remote_tables = {
             "factory_pool_created": "uniswap_v3_factory_pool_created_events_combined",
