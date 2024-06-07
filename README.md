@@ -70,7 +70,7 @@ address = '0xc31e54c7a869b9fcbecc14363cf510d1c41fa443'
 # if you're using allium, pass update_from='allium' to v3Pool()
 arb = state.v3Pool(address, 'arbitrum', update = True) 
 
-swaps = arb.getSwaps
+swaps = arb.swaps
 ```
 
 
