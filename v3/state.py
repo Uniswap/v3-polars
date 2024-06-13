@@ -131,6 +131,19 @@ class v3Pool:
                     .with_columns(
                         as_of=pl.col("block_number") + pl.col("transaction_index") / 1e4
                     )
+                    .cast(
+                        {
+                            "block_timestamp":pl.Datetime,
+                            "amount0":pl.Float64,
+                            "amount1":pl.Float64,
+                            "sqrtPriceX96":pl.Float64,
+                            "liquidity":pl.Float64,
+                            "tick":pl.Int32, # tick in v3 is int24
+                            "gas_price":pl.Int64,
+                            "gas_used":pl.Int64,
+                            "l1_fee":pl.Int64
+                        }
+                    )
                     .collect()
                     .sort("as_of")
                 )
@@ -156,6 +169,12 @@ class v3Pool:
                             "tick_lower": pl.Int64,
                             "tick_upper": pl.Int64,
                             "type_of_event": pl.Float64,
+                            "block_timestamp":pl.Datetime,
+                            "amount0":pl.Float64,
+                            "amount1":pl.Float64,
+                            "gas_price":pl.Int64,
+                            "gas_used":pl.Int64,
+                            "l1_fee":pl.Int64
                         }
                     )
                     .with_columns(
