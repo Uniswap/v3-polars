@@ -163,9 +163,10 @@ class allium:
                         FROM {table}
                         where 1=1
                         and "block_number" >= {min_block}
-                        and "block_number" <= {max_block}
-                        order by "block_timestamp" asc
-                    ) limit {tgt_max_rows}
+                        and "block_number" <= {max_block} 
+                    ) 
+                    order by "block_number" asc
+                    limit {tgt_max_rows}
                 )
             """
 
