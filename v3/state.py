@@ -202,8 +202,10 @@ class v3Pool:
             .filter(pl.col("as_of") < as_of)
             .tail(1)
             .select(pool_property)
-            .item()
         )
+
+        if pool_property.is_empty():
+            return None
 
         return pool_property
 
@@ -216,7 +218,7 @@ class v3Pool:
         """
         tick = self.getPropertyFrom(as_of, "tick")
 
-        if tick == None:
+        if tick.is_null():
             assert not revert_on_uninitialized, "Tick is not initialized"
             return None
         else:
@@ -231,7 +233,7 @@ class v3Pool:
         """
         price = self.getPropertyFrom(as_of, "sqrtPriceX96")
 
-        if price == None:
+        if price.is_null():
             assert not revert_on_uninitialized, "Price is not initialized"
             return None
         else:

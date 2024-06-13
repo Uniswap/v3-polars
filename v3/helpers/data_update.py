@@ -94,7 +94,7 @@ def findSegment(table, connector, max_block, min_block, chain, tgt_max_rows):
     )
     df = connector.execute(q)
 
-    return df.item()
+    return df.item() - 1
 
 
 def readOVM(path, data_type):
@@ -252,7 +252,7 @@ def _update_tables(pool, tables=[], test_mode=False):
                 writeDataset(df, table, pool.data_path, 0, 0)
 
             # this moves the iteration, we pulled all of block n, so we want to start at n+1
-            min_block_of_segment = max_block_of_segment + 1
+            min_block_of_segment = df.select('block_number').max().item() + 1
 
             if test_mode:
                 break
