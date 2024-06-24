@@ -2,13 +2,16 @@ import polars as pl
 import os
 from datetime import date, timedelta, datetime, timezone
 
+
 def get_gbq_client(proj_id):
     try:
         from google.cloud import bigquery
 
         return bigquery.Client(project=proj_id)
     except ImportError:
-        raise Exception("GCP could not be imported. If you want to use another source (such as allium), set update_from to the desired source e.g. 'allium'")
+        raise Exception(
+            "GCP could not be imported. If you want to use another source (such as allium), set update_from to the desired source e.g. 'allium'"
+        )
 
 
 class gbq:

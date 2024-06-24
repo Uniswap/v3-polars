@@ -7,7 +7,7 @@ class allium:
         self.allium_query_id = allium_query_id
         self.allium_api_key = allium_api_key
 
-    def get_remote_table(self, table, chain):
+    def get_remote_table(self, table, pool, chain):
         # which chains are layer 2s (to get the l1 fee)
         layer_2s = ["base", "arbitrum", "optimism"]
 
@@ -25,6 +25,7 @@ class allium:
                 f"Chain {chain} not supported in the allium adapter, please update uniswap_to_allium_name_mapping."
             )
 
+        # we pull all data for factory create to support different data types
         if table == "factory_pool_created":
             query = f"""
             (
@@ -43,6 +44,7 @@ class allium:
                 where 1=1 and protocol='uniswap_v3'
             )
             """
+
         elif table == "pool_swap_events":
             query = f"""
             (
@@ -70,9 +72,10 @@ class allium:
                     t1.fee_details['receipt_gas_used']::varchar as "gas_used",
                     t1.fee_details['receipt_l1_fee']::varchar as "l1_fee"
                 from {allium_chain_name}.dex.uniswap_v3_events t1
-                where 1=1 and t1.event='swap'
+                where 1=1 and t1.event='swap' and t1.liquidity_pool_address='{pool}'
             )
             """
+
         elif table == "pool_mint_burn_events":
             query = f"""
             (
@@ -101,9 +104,10 @@ class allium:
                     t1.fee_details['receipt_gas_used']::varchar as "gas_used",
                     t1.fee_details['receipt_l1_fee']::varchar as "l1_fee"
                 from {allium_chain_name}.dex.uniswap_v3_events t1
-                where 1=1 and event in ('mint', 'burn')
+                where 1=1 and event in ('mint', 'burn') and t1.liquidity_pool_address='{pool}'
             )
             """
+
         elif table == "pool_initialize_events":
             query = f"""
             (
@@ -129,6 +133,7 @@ class allium:
                 where 1=1 and event = 'initialize'
             )
             """
+
         else:
             raise ValueError(f"Table {table} not recognized.")
         return query
@@ -137,8 +142,8 @@ class allium:
         """
         We want to find the bounds of the remote database
         """
-        table, chain = args
-        table = self.get_remote_table(table, chain)
+        table, pool, chain = args
+        table = self.get_remote_table(table, pool, chain)
 
         q = f"""select min("block_number") as min_block,
                    max("block_number") as max_block,
@@ -152,8 +157,8 @@ class allium:
         We want to find the smallest block such that we are pulling
         around the tgt_max_rows number of rows from GBQ
         """
-        table, max_block, min_block, chain, tgt_max_rows = args
-        table = self.get_remote_table(table, chain)
+        table, max_block, min_block, pool, chain, tgt_max_rows = args
+        table = self.get_remote_table(table, pool, chain)
 
         q = f"""select max("block_number")
                 from (
@@ -176,8 +181,8 @@ class allium:
         """
         Pull from internal GBQ data lake
         """
-        table, max_block_of_segment, min_block_of_segment, chain = args
-        table = self.get_remote_table(table, chain)
+        table, max_block_of_segment, min_block_of_segment, pool, chain = args
+        table = self.get_remote_table(table, pool, chain)
 
         q = f"""select * 
             FROM {table}
@@ -205,14 +210,14 @@ class allium:
             headers={"X-API-Key": self.allium_api_key},
             timeout=240,
         )
-        
+
         response_json = response.json()
 
         data = response_json.get("data")
 
-        if not data:
-            raise Exception(f"No data returned from Allium query {q}, query response: {response_json}")
-        
+        # if not data:
+        #     raise Exception(f"No data returned from Allium query {q}, query response: {response_json}")
+
         # polars from dict
         df = pl.DataFrame(data)
 
@@ -232,8 +237,6 @@ class allium:
             )
 
         if len(df) >= 200_000:
-            raise Exception(
-                "Please fetch at most 200,000 rows at a time"
-            )
+            raise Exception("Please fetch at most 200,000 rows at a time")
 
         return df
