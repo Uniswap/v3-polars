@@ -45,6 +45,9 @@ class allium:
             )
             """
 
+        # TODO: this is breaking
+        # change t1.token0_amount_str -> t1.token0_amount_raw_str
+        # ibid for token1
         elif table == "pool_swap_events":
             query = f"""
             (
@@ -76,6 +79,9 @@ class allium:
             )
             """
 
+        # TODO: this is breaking
+        # change t1.token0_amount_str -> t1.token0_amount_raw_str
+        # ibid for token1
         elif table == "pool_mint_burn_events":
             query = f"""
             (
@@ -134,8 +140,62 @@ class allium:
             )
             """
 
+        elif table == "nfp":
+            query = f"""
+            (
+               select nfp."name",
+                    nfp."chain_name",
+                    nfp."transaction_hash",
+                    nfp."block_number",
+                    nfp."tx_index",
+                    nfp."from_address",
+                    nfp."amount",
+                    nfp."amount0",
+                    nfp."amount1",
+                    nfp."tokenId",      
+                    mb."tick_lower",
+                    mb."tick_upper"
+                from 
+                (
+                    select t1.name as "name",
+                            t1.params['liquidity'] as "amount",
+                            t1.params['amount0'] as "amount0",
+                            t1.params['amount1'] as "amount1",
+                            t1.params['tokenId'] as "tokenId",
+                            'ethereum' as "chain_name",
+                            t1.transaction_hash as "transaction_hash",
+                            t1.block_number as "block_number",
+                            t1.transaction_index as "tx_index",
+                            t1.transaction_from_address as "from_address",
+                            t1.log_index as "nfp_log_index"
+                    from ethereum.decoded.logs t1
+                    where 1=1
+                    and address = '0xc36442b4a4522e871399cd717abdd847ab11fe88'
+                )  nfp
+                inner join (
+                    select t2.liquidity_pool_address as "address",
+                            t2.transaction_hash as "transaction_hash",
+                            t2.liquidity as "amount",
+                            t2.token0_amount_raw_str as "amount0",
+                            t2.token1_amount_raw_str as "amount1",
+                            t2.tick_lower as "tick_lower",
+                            t2.tick_upper as "tick_upper",
+                            t2.log_index as "core_log_index"
+                    from ethereum.dex.uniswap_v3_events t2
+                    where 1=1 and event in ('mint', 'burn') 
+                    and t2.liquidity_pool_address='{pool}'
+                ) mb
+                on nfp."transaction_hash" == mb."transaction_hash"
+                and nfp."amount" == mb."amount"
+                and nfp."amount0" == mb."amount0"
+                and nfp."amount1" == mb."amount1"
+                and nfp."nfp_log_index" > mb."core_log_index"
+            )
+            """
+
         else:
             raise ValueError(f"Table {table} not recognized.")
+
         return query
 
     def minMax(self, *args):
@@ -215,8 +275,8 @@ class allium:
 
         data = response_json.get("data")
 
-        if not data:
-            raise Exception(f"No data returned from Allium query {q}, query response: {response_json}")
+        # if not data:
+        #     raise Exception(f"No data returned from Allium query {q}, query response: {response_json}")
 
         # polars from dict
         df = pl.DataFrame(data)
