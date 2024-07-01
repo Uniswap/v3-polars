@@ -170,7 +170,7 @@ class allium:
                             t1.log_index as "nfp_log_index"
                     from ethereum.decoded.logs t1
                     where 1=1
-                    and address = '0xc36442b4a4522e871399cd717abdd847ab11fe88'
+                    and address = '0xc36442b4a4522e871399cd717abdd847ab11fe88' -- l1 nfp address
                 )  nfp
                 inner join (
                     select t2.liquidity_pool_address as "address",
