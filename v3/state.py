@@ -56,9 +56,9 @@ class v3Pool:
         # and "uniswap_v3_pool" bc its unneeded
         self.tables = [
             "factory_pool_created",
+            "pool_initialize_events",
             "pool_swap_events",
             "pool_mint_burn_events",
-            "pool_initialize_events",
         ]
 
         self.connector = None

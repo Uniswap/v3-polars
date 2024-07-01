@@ -22,6 +22,9 @@ def check_test_mode(pool):
     err = "Test mode requires chain_id to be ethereum"
     assert pool.chain == "ethereum", err
 
+    err = "Test mode requires pool to be UNI/ETH 30 bps"
+    assert pool.pool == "0x1d42064Fc4Beb5F8aAF85F4617AE8b3b5B8Bd801".lower(), err
+
 
 def test_assertion(pool):
     for table in [
@@ -30,12 +33,14 @@ def test_assertion(pool):
         "pool_initialize_events",
         "factory_pool_created",
     ]:
+        uni_eth = "0x1d42064Fc4Beb5F8aAF85F4617AE8b3b5B8Bd801".lower()
         ordering = ["block_number", "transaction_index", "log_index"]
         if table == "factory_pool_created":
             ordering = ["block_number", "log_index"]
 
         test = (
             pl.scan_parquet(f"{pool.data_path}/{table}/*.parquet")
+            .filter(pl.col("address") == uni_eth)
             .sort(ordering)
             .collect()
         )
@@ -46,7 +51,10 @@ def test_assertion(pool):
         p = str(Path(pool.data_path).parent)
 
         examples = (
-            pl.scan_parquet(f"{p}/examples/{table}/*.parquet").sort(ordering).collect()
+            pl.scan_parquet(f"{p}/examples/{table}/*.parquet")
+            .filter(pl.col("address") == uni_eth)
+            .sort(ordering)
+            .collect()
         )
 
         examples = examples.select(sorted(examples.columns))
