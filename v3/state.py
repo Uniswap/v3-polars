@@ -221,11 +221,11 @@ class v3Pool:
         """
         tick = self.getPropertyFrom(as_of, "tick")
 
-        if tick.is_null():
+        if type(tick) is not pl.DataFrame:
             assert not revert_on_uninitialized, "Tick is not initialized"
             return None
         else:
-            return int(tick)
+            return int(tick.item())
 
     def getPriceAt(self, as_of, revert_on_uninitialized=False):
         """
@@ -236,11 +236,11 @@ class v3Pool:
         """
         price = self.getPropertyFrom(as_of, "sqrtPriceX96")
 
-        if price.is_null():
+        if type(price) is not pl.DataFrame:
             assert not revert_on_uninitialized, "Price is not initialized"
             return None
         else:
-            return int(price)
+            return int(price.item())
 
     def getPriceSeries(self, as_of, frequency="6h", gas=False):
         """
