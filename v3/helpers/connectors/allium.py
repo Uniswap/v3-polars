@@ -152,7 +152,8 @@ class allium:
                     nfp."amount",
                     nfp."amount0",
                     nfp."amount1",
-                    nfp."tokenId",      
+                    nfp."tokenId", 
+                    mb."address",     
                     mb."tick_lower",
                     mb."tick_upper"
                 from 
