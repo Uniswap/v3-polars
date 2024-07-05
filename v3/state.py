@@ -16,7 +16,7 @@ class v3Pool:
         pull=True,
         tgt_max_rows=200_000,
         test_mode=False,
-        tables = None
+        tables = []
     ):
         """
         Impliments and maintains a representation of Uniswap v3 Pool
@@ -54,7 +54,7 @@ class v3Pool:
         checkPath("", self.data_path)
 
         # tables to update
-        if type(tables) != list:
+        if tables == []:
             self.tables = [
                 "factory_pool_created",
                 "pool_initialize_events",
@@ -62,6 +62,7 @@ class v3Pool:
                 "pool_mint_burn_events",
             ]
         else:
+            assert type(tables) == list, "Please provide a list for tables"
             self.tables = tables
 
         self.connector = None

@@ -7,6 +7,21 @@ class allium:
         self.allium_query_id = allium_query_id
         self.allium_api_key = allium_api_key
 
+    def get_nfp_table(self, chain):
+        chain_to_nfp_contract = {
+                'ethereum': '0xc36442b4a4522e871399cd717abdd847ab11fe88'.lower(),
+                'base': '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1'.lower(),
+                'polygon': '0xC36442b4a4522E871399CD717aBDD847Ab11FE88'.lower(),
+                'optimism': '0xC36442b4a4522E871399CD717aBDD847Ab11FE88'.lower(),
+                'arbitrum': '0xC36442b4a4522E871399CD717aBDD847Ab11FE88'.lower()
+            }
+        
+        err = f"{chain} has no corresponding nft position manager"
+
+        assert chain in chain_to_nfp_contract.keys(), err
+        
+        return chain_to_nfp_contract[chain]
+
     def get_remote_table(self, table, pool, chain):
         # which chains are layer 2s (to get the l1 fee)
         layer_2s = ["base", "arbitrum", "optimism"]
@@ -16,7 +31,7 @@ class allium:
             "ethereum": "ethereum",
             "base": "base",
             "arbitrum": "arbitrum",
-            "optimism": "optimism",
+            # "optimism": "optimism", missing the ovm dataset
             "polygon": "polygon",
         }
         allium_chain_name = uniswap_to_allium_name_mapping.get(chain, None)
@@ -141,6 +156,8 @@ class allium:
             """
 
         elif table == "nfp":
+            nfp_address = self.get_nfp_table(chain)
+            
             query = f"""
             (
                select nfp."name",
@@ -163,15 +180,15 @@ class allium:
                             t1.params['amount0'] as "amount0",
                             t1.params['amount1'] as "amount1",
                             t1.params['tokenId'] as "tokenId",
-                            'ethereum' as "chain_name",
+                            '{allium_chain_name}' as "chain_name",
                             t1.transaction_hash as "transaction_hash",
                             t1.block_number as "block_number",
                             t1.transaction_index as "tx_index",
                             t1.transaction_from_address as "from_address",
                             t1.log_index as "nfp_log_index"
-                    from ethereum.decoded.logs t1
+                    from {allium_chain_name}.decoded.logs t1
                     where 1=1
-                    and address = '0xc36442b4a4522e871399cd717abdd847ab11fe88' -- l1 nfp address
+                    and address = '{nfp_address}' -- l1 nfp address
                 )  nfp
                 inner join (
                     select t2.liquidity_pool_address as "address",
@@ -182,7 +199,7 @@ class allium:
                             t2.tick_lower as "tick_lower",
                             t2.tick_upper as "tick_upper",
                             t2.log_index as "core_log_index"
-                    from ethereum.dex.uniswap_v3_events t2
+                    from {allium_chain_name}.dex.uniswap_v3_events t2
                     where 1=1 and event in ('mint', 'burn') 
                     and t2.liquidity_pool_address='{pool}'
                 ) mb
@@ -193,7 +210,6 @@ class allium:
                 and nfp."nfp_log_index" > mb."core_log_index"
             )
             """
-
         else:
             raise ValueError(f"Table {table} not recognized.")
 
