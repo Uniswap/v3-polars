@@ -218,9 +218,7 @@ class allium:
 
         # Raise an exception if no data is returned
         if not data:
-            raise Exception(
-                f"No data returned from Allium query {q}, query response: {response_json}"
-            )
+            return pl.DataFrame()
 
         # Create a DataFrame from the data
         df = pl.DataFrame(data)
