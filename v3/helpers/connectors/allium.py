@@ -216,7 +216,7 @@ class allium:
         data = response_json.get("data")
 
         if not data:
-            raise Exception(f"No data returned from Allium query {q}, query response: {response_json}")
+            return pl.DataFrame()
 
         # polars from dict
         df = pl.DataFrame(data)

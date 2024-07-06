@@ -216,6 +216,13 @@ def _update_tables(pool, tables=[], test_mode=False):
                 pool.chain,
             )
 
+            # if there was no data, `df` will be empty
+            if df.is_empty():
+                print(
+                    f"No data found for {min_block_of_segment} to {max_block_of_segment}"
+                )
+                break
+
             # save it down
             writeDataset(
                 df,
