@@ -204,6 +204,7 @@ class allium:
             raise ValueError("Missing table definition")
 
     def execute(self, q):
+        # Send a POST request to the Allium API to execute the query
         response = requests.post(
             f"https://api.allium.so/api/v1/explorer/queries/{self.allium_query_id}/run",
             json={"query_text": q},
@@ -211,17 +212,20 @@ class allium:
             timeout=240,
         )
 
+        # Parse the JSON response
         response_json = response.json()
-
         data = response_json.get("data")
 
+        # Raise an exception if no data is returned
         if not data:
-            raise Exception(f"No data returned from Allium query {q}, query response: {response_json}")
+            raise Exception(
+                f"No data returned from Allium query {q}, query response: {response_json}"
+            )
 
-        # polars from dict
+        # Create a DataFrame from the data
         df = pl.DataFrame(data)
 
-        # api doesn't deal with camel case out of the box
+        # Rename columns to match expected format
         column_renames = {
             "tick_spacing": "tickSpacing",
             "sqrt_price_x96": "sqrtPriceX96",
@@ -230,12 +234,13 @@ class allium:
             if original in df.columns:
                 df = df.rename({original: new})
 
-        # convert block_timestamp from string like '2024-04-02 12:21:33' to datetime
+        # Convert block_timestamp from string to datetime with UTC timezone
         if "block_timestamp" in df.columns:
             df = df.with_columns(
                 df["block_timestamp"].str.to_datetime().dt.replace_time_zone("UTC")
             )
 
+        # Raise an exception if the DataFrame has 200,000 or more rows
         if len(df) >= 200_000:
             raise Exception("Please fetch at most 200,000 rows at a time")
 

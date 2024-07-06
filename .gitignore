@@ -161,3 +161,5 @@ cython_debug/
 #.idea/
 
 !Crosschain_Liquidity_GIF.ipynb
+
+.DS_Store
