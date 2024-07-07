@@ -14,7 +14,8 @@ class v3Pool:
         low_memory=False,
         update=False,
         pull=True,
-        tgt_max_rows=1_000_000,
+        tgt_max_rows=200_000,
+        test_mode=False,
     ):
         """
         Impliments and maintains a representation of Uniswap v3 Pool
@@ -58,24 +59,25 @@ class v3Pool:
         self.cache = {}
 
         # data checkers
-        self.path = f"{PACKAGEDIR}/data"
-        self.data_path = f"{PACKAGEDIR}/data"
+        self.path = str(Path(f"{PACKAGEDIR}/data").resolve())
+        self.data_path = str(Path(f"{PACKAGEDIR}/data").resolve())
         checkPath("", self.data_path)
 
         # we strip the "uniswap_v3_factory"
         # and "uniswap_v3_pool" bc its unneeded
         self.tables = [
-            "uniswap_v3_factory_pool_created_events_combined",
-            "uniswap_v3_pool_swap_events_combined",
-            "uniswap_v3_pool_mint_burn_events_combined",
-            "uniswap_v3_pool_initialize_events_combined",
+            "factory_pool_created",
+            "pool_initialize_events",
+            "pool_swap_events",
+            "pool_mint_burn_events",
         ]
 
+        self.connector = None
         # data quality assurances
         self.max_supported = -1
 
         if update:
-            update_tables(self, update_from, self.tables)
+            update_tables(self, update_from, self.tables, test_mode)
 
             if self.chain == "optimism":
                 print("Chain = optimism - Start pulling the ovm1")
@@ -83,16 +85,21 @@ class v3Pool:
                 # pain
                 try:
                     self.chain = "optimism_legacy_ovm1"
-                    update_tables(self, update_from, self.tables)
+                    update_tables(self, update_from, self.tables, test_mode)
                 except Exception as e:
                     raise (e)
                 # we dont want these race condition
                 finally:
                     self.chain = "optimism"
+        else:
+            if test_mode:
+                raise ValueError("test_mode true but update false")
 
         self.ts, self.fee, self.token0, self.token1 = initializePoolFromFactory(
-            pool, self.chain, self.data_path
+            self.pool, self.chain, self.data_path
         )
+        if test_mode:
+            test_assertion(self)
 
         if pull:
             self.readFromMemoryOrDisk("pool_swap_events", self.data_path, save=True)
@@ -263,8 +270,10 @@ class v3Pool:
             .filter(pl.col("as_of") < as_of)
             .tail(1)
             .select(pool_property)
-            .item()
         )
+
+        if pool_property.is_empty():
+            return None
 
         return pool_property
 
@@ -277,11 +286,11 @@ class v3Pool:
         """
         tick = self.getPropertyFrom(as_of, "tick")
 
-        if tick == None:
+        if type(tick) is not pl.DataFrame:
             assert not revert_on_uninitialized, "Tick is not initialized"
             return None
         else:
-            return int(tick)
+            return int(tick.item())
 
     def getPriceAt(self, as_of, revert_on_uninitialized=False):
         """
@@ -292,7 +301,7 @@ class v3Pool:
         """
         price = self.getPropertyFrom(as_of, "sqrtPriceX96")
 
-        if price == None:
+        if type(price) is not pl.DataFrame:
             assert not revert_on_uninitialized, "Price is not initialized"
             return None
         else:

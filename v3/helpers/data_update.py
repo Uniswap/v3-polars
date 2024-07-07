@@ -1,15 +1,10 @@
 import polars as pl
 import os
 from datetime import date, timedelta, datetime, timezone
-
-gcp_locked = True
-try:
-    from google.cloud import bigquery
-
-    gcp_locked = False
-except ImportError:
-    print("Unable to import GCP")
-
+from .connectors import allium, gbq
+from .test_helpers import *
+from pathlib import Path
+import json
 
 # data updating
 def checkPath(data_type, data_path):
@@ -52,81 +47,61 @@ def getHeader(table, data_path):
     return max(max_index) + 1
 
 
-def writeDataset(df, data_type, data_path, max_block_of_segment, min_block_of_segment):
+def writeDataset(df, table, data_path, max_block_of_segment, min_block_of_segment):
     """
     Writes the given file with the given heuristics to the disk
     """
-    if df.is_empty():
-        print("Data pass to save is empty - passing")
-    else:
-        idx = getHeader(data_type, data_path)
+    idx = getHeader(table, data_path)
+    if not df.is_empty():
         df.write_parquet(
-            f"{data_path}/{data_type}/{idx}_{min_block_of_segment}_{max_block_of_segment}_{data_type}.parquet"
+            f"{data_path}/{table}/{idx}_{min_block_of_segment}_{max_block_of_segment}_{table}.parquet",
         )
 
 
-def readGBQ(gbq_table, max_block_of_segment, min_block_of_segment, client, chain):
+def readRemote(
+    table, connector, max_block_of_segment, min_block_of_segment, pool, chain
+):
     """
-    Pull from internal GBQ data lake
+    Read the raw dataframe from remote
     """
-    q = f"""select * 
-        FROM `{gbq_table}` 
-        WHERE chain_name = '{chain}'
-        AND block_number <= {max_block_of_segment}
-        AND block_number >= {min_block_of_segment}
-        """
 
-    query_job = client.query(q)  # API request
-    rows = query_job.result()  # Waits for query to finish
-
-    df = pl.from_arrow(rows.to_arrow())
+    q = connector.get_template(
+        "read", table, max_block_of_segment, min_block_of_segment, pool, chain
+    )
+    df = connector.execute(q)
 
     return df
 
 
-def checkMinMaxBlock(gbq_table, client, chain):
+def checkGlobalMinMaxBlock(table, connector, pool, chain):
     """
     Find the max and min row in the database to pull over
     """
+
     # read the first entry
-    q = f"""select min(block_number) as min_block,
-                   max(block_number) as max_block,
-                   FROM `{gbq_table}` 
-                   where chain_name = '{chain}'
-         """
-    query_job = client.query(q)  # API request
-    rows = query_job.result()  # Waits for query to finish
+    q = connector.get_template("minMax", table, pool, chain)
+    df = connector.execute(q)
 
-    df = pl.from_arrow(rows.to_arrow())
-    return df["max_block"].item(), df["min_block"].item()
+    print(df)
+    if not df.is_empty():
+        return df["max_block"].item(), df["min_block"].item()
+    else:
+        return -1, -1
 
 
-def findSegment(gbq_table, min_block, client, chain, tgt_max_rows):
+def findSegment(table, connector, max_block, min_block, pool, chain, tgt_max_rows):
     """
     We want to find the smallest block such that we are pulling
     around the tgt_max_rows number of rows from GBQ
     """
-    q = f"""select max(block_number)
-            from (
-                select * 
-                  from (
-                    select block_number,
-                            row_number() over (order by block_timestamp asc) as rownum
-                    FROM `{gbq_table}` 
-                    where chain_name = '{chain}'
-                    and block_number >= {min_block}
-                    order by block_timestamp asc
-                  ) 
-                where rownum <= {tgt_max_rows}
-            )
-         """
 
-    query_job = client.query(q)  # API request
-    rows = query_job.result()  # Waits for query to finish
+    q = connector.get_template(
+        "findSegment", table, max_block, min_block, pool, chain, tgt_max_rows
+    )
+    df = connector.execute(q)
 
-    df = pl.from_arrow(rows.to_arrow())
+    return df.item() - 1
 
-    return df.item()
 
 
 def readOVM(path, data_type):
@@ -146,47 +121,59 @@ def readOVM(path, data_type):
     return mappings
 
 
-def update_tables_gbq(pool, tables=[]):
-    """
-    This is the big file that pulls from the GBQ servers for the given
-    pool and requested tables
-    """
-    # bigquery strings -> python
-    proj_id = "uniswap-labs"
-    db = "on_chain_events"
-    client = bigquery.Client(project=proj_id)
+def _update_tables(pool, tables=[], test_mode=False):
+    if test_mode:
+        check_test_mode(pool)
+        pool.data_path = f"{pool.data_path}/test"
+        checkPath("", pool.data_path)
 
-    tableToDB = {
-        "uniswap-labs.on_chain_events.uniswap_v3_factory_pool_created_events_combined": "factory_pool_created",
-        "uniswap-labs.on_chain_events.uniswap_v3_pool_swap_events_combined": "pool_swap_events",
-        "uniswap-labs.on_chain_events.uniswap_v3_pool_mint_burn_events_combined": "pool_mint_burn_events",
-        "uniswap-labs.on_chain_events.uniswap_v3_pool_initialize_events_combined": "pool_initialize_events",
-    }
+        for p in Path(pool.data_path).iterdir():
+            if not p.is_dir():
+                continue
+            for x in p.iterdir():
+                x.unlink(missing_ok=True)
 
-    if tables == []:
+        # 1000th swap on mainnet happened at this block
+        max_block = 12376625
+
+    if tables == [] or test_mode:
         tables = pool.tables
 
     for table in tables:
         print(f"Starting table {table}")
-        gbq_table = f"{proj_id}.{db}.{table}"
+        checkPath(table, pool.data_path)
 
-        data_type = tableToDB[gbq_table]
-        checkPath(data_type, pool.data_path)
-
-        # max row in gbq and min row in gbq
-        max_block, min_block_of_segment = checkMinMaxBlock(
-            gbq_table, client, pool.chain
+        # max row in gbq and min row in remote
+        max_block, min_block_of_segment = checkGlobalMinMaxBlock(
+            table, pool.connector, pool.pool, pool.chain
         )
+
+        if max_block == -1:
+            print(f"Failed to find table for {table}")
+            continue
+
         print(f"Found {min_block_of_segment} to {max_block}")
 
+        if test_mode:
+            check_min_segment(min_block_of_segment, table)
+            print(f"Check remote max for table {table} is {max_block}")
+            max_block = 12376625
+
         # check if we already have data
-        header = getHeader(data_type, pool.data_path)
+        header = getHeader(table, pool.data_path)
         # we already have existing data, so lets get the bn to only append new stuff
         if header != 0:
-            print(f"Found data saved")
+
+            # we pull all data on factory_pool_created - so we override the filter to be true
+            optimistic_address_filter = True
+            if table in ["pool_swap_events", "pool_mint_burn_events"]:
+                optimistic_address_filter = pl.col("address") == pool.pool
+
             found_min_block_of_segment = (
-                pl.scan_parquet(f"{pool.path}/{data_type}/*.parquet")
-                .filter(pl.col("chain_name") == pool.chain)
+                pl.scan_parquet(f"{pool.data_path}/{table}/*.parquet")
+                .filter(
+                    (pl.col("chain_name") == pool.chain) & (optimistic_address_filter)
+                )
                 .select("block_number")
                 .max()
                 .collect()
@@ -196,8 +183,10 @@ def update_tables_gbq(pool, tables=[]):
             if found_min_block_of_segment == None:
                 pass
             else:
+                assert not test_mode, "Found loaded test folder"
                 min_block_of_segment = found_min_block_of_segment + 1
-            print(f"Updated to {min_block_of_segment} to {max_block}")
+
+            print(f"Found data - Updated to {min_block_of_segment} to {max_block}")
 
         iterations = 0
         while max_block > min_block_of_segment:
@@ -207,27 +196,37 @@ def update_tables_gbq(pool, tables=[]):
             # the finds the max block of the segment
             # which is the max block that returns close to the target amount of rows to pull from gbq
             max_block_of_segment = findSegment(
-                gbq_table,
+                table,
+                pool.connector,
+                max_block,
                 min_block_of_segment,
-                client,
+                pool.pool,
                 pool.chain,
                 pool.tgt_max_rows,
             )
 
             print(f"Going from {min_block_of_segment} to {max_block_of_segment}")
-            # read that segment in from gbq
-            df = readGBQ(
-                gbq_table,
+            # read that segment in from remote
+            df = readRemote(
+                table,
+                pool.connector,
                 max_block_of_segment,
                 min_block_of_segment,
-                client,
+                pool.pool,
                 pool.chain,
             )
+
+            # if there was no data, `df` will be empty
+            if df.is_empty():
+                print(
+                    f"No data found for {min_block_of_segment} to {max_block_of_segment}"
+                )
+                break
 
             # save it down
             writeDataset(
                 df,
-                data_type,
+                table,
                 pool.data_path,
                 max_block_of_segment,
                 min_block_of_segment,
@@ -259,7 +258,7 @@ def update_tables_gbq(pool, tables=[]):
                     .cast({"block_number": pl.Int64})
                 )
 
-                if data_type in [
+                if table in [
                     "pool_swap_events",
                     "pool_mint_burn_events",
                     "pool_initialize_events",
@@ -270,7 +269,7 @@ def update_tables_gbq(pool, tables=[]):
                         address=pl.col("address").map_dict(mapping, default=None)
                     )
 
-                elif data_type in ["factory_pool_created"]:
+                elif table in ["factory_pool_created"]:
                     df = df.with_columns(
                         # ovm changed contract addresses from ovm1 to ovm2
                         # we map this back for us
@@ -278,28 +277,56 @@ def update_tables_gbq(pool, tables=[]):
                     )
 
                 # we index the optimism chain by backloading all the ovm1 data as optimism at block 0
-                writeDataset(df, data_type, pool.data_path, 0, 0)
+                writeDataset(df, table, pool.data_path, 0, 0)
 
             # this moves the iteration, we pulled all of block n, so we want to start at n+1
-            min_block_of_segment = max_block_of_segment + 1
+            if not df.is_empty():
+                min_block_of_segment = df.select("block_number").max().item() + 1
+            else:
+                # if we didn't pull anything, it may still be fine
+                # this is likely because no data exists in the pulled sample
+                # the failure moat should be captured by the connectors
+                min_block_of_segment = max_block_of_segment + 1
+
+            if test_mode:
+                break
 
         if iterations == 0:
             print("Nothing to update")
 
 
-def update_tables_cryo(pool, tables=[]):
-    """
-    sad
-    """
-    # TODO
-    raise NotImplementedError("Cryo is not yet implimented")
-
-
-def update_tables(pool, update_from, tables=[]):
+def update_tables(pool, update_from, tables=[], test_mode=False):
     if update_from == "gcp":
-        assert not gcp_locked, "GCP could not be imported"
-        update_tables_gbq(pool, tables)
+        gcp_locked = True
+        try:
+            from google.cloud import bigquery
+
+            gcp_locked = False
+        except ImportError:
+            raise Exception(
+                "GCP could not be imported. If you want to use another source (such as allium), set update_from to the desired source e.g. 'allium'"
+            )
+
+        pool.connector = gbq()
+        _update_tables(pool, tables, test_mode)
+
+    elif update_from == "allium":
+        assert (
+            pool.tgt_max_rows <= 200_000
+        ), "Attempting to pull too many rows (>200k), set tgt_max_rows to less than 100k rows"
+
+        allium_query_id = os.getenv("ALLIUM_POLARSV3_QUERY_ID")
+        allium_api_key = os.getenv("ALLIUM_POLARSV3_API_KEY")
+
+        assert (
+            allium_query_id and allium_api_key
+        ), "Please set ALLIUM_POLARSV3_QUERY_ID and ALLIUM_POLARSV3_API_KEY environment variables"
+
+        pool.connector = allium(allium_query_id, allium_api_key)
+        _update_tables(pool, tables, test_mode)
+
     elif update_from == "cryo":
-        update_tables_cryo(pool, tables)
+        raise NotImplementedError("sad")
+        # _update_tables(pool, tables, test_mode)
     else:
-        raise NotImplementedError("Data puller not implimented")
+        raise NotImplementedError("Data puller not implemented")

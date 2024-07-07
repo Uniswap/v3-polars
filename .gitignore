@@ -4,6 +4,8 @@ v3/data/factory_pool_created/
 v3/data/pool_initialize_events
 v3/data/pool_mint_burn_events
 v3/data/pool_swap_events
+v3/data/test/*
+v3/secrets.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -159,3 +161,5 @@ cython_debug/
 #.idea/
 
 !Crosschain_Liquidity_GIF.ipynb
+
+.DS_Store
