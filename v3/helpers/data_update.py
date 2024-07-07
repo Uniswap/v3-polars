@@ -6,7 +6,6 @@ from .test_helpers import *
 from pathlib import Path
 import json
 
-
 # data updating
 def checkPath(data_type, data_path):
     """
@@ -102,6 +101,7 @@ def findSegment(table, connector, max_block, min_block, pool, chain, tgt_max_row
     df = connector.execute(q)
 
     return df.item() - 1
+
 
 
 def readOVM(path, data_type):
