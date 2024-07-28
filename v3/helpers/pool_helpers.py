@@ -26,7 +26,7 @@ def initializePoolFromFactory(addr, chain, data_path):
     assert not factory.shape[0] > 1, "Multiple pools at that address"
 
     ts = int(factory["tickSpacing"].item())
-    fee = int(factory["fee"].item())
+    fee = int(float(factory["fee"].item()))
 
     token0 = factory["token0"].item()
     token1 = factory["token1"].item()
