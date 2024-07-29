@@ -67,6 +67,7 @@ def swapIn(calldata, pool, warn=True):
     # stops us from hitting annoying bugs
     assert swapIn != 0, "We do not support swaps of 0"
 
+    provided = 0 if provided == None else provided
     if as_of != pool.cache["as_of"]:
         pool.calcSwapDF(as_of, provided)
 
