@@ -16,6 +16,7 @@ class v3Pool:
         pull=True,
         tgt_max_rows=200_000,
         test_mode=False,
+        tables = []
     ):
         """
         Impliments and maintains a representation of Uniswap v3 Pool
@@ -52,14 +53,17 @@ class v3Pool:
         self.data_path = str(Path(f"{PACKAGEDIR}/data").resolve())
         checkPath("", self.data_path)
 
-        # we strip the "uniswap_v3_factory"
-        # and "uniswap_v3_pool" bc its unneeded
-        self.tables = [
-            "factory_pool_created",
-            "pool_initialize_events",
-            "pool_swap_events",
-            "pool_mint_burn_events",
-        ]
+        # tables to update
+        if tables == []:
+            self.tables = [
+                "factory_pool_created",
+                "pool_initialize_events",
+                "pool_swap_events",
+                "pool_mint_burn_events",
+            ]
+        else:
+            assert type(tables) == list, "Please provide a list for tables"
+            self.tables = tables
 
         self.connector = None
         # data quality assurances
