@@ -60,7 +60,116 @@ def dtToBN(dt, pool):
     return bn_as_of
 
 
-def createSwapDF(as_of, pool):
+def slot0ToAsOf(entry):
+    bn = (entry["block_number"] + entry["transaction_index"] / 1e4).item()
+
+    return bn
+
+
+# TODO
+# once we can traverse this list we can increased
+# the n_saved to make this have increased value
+def pull_block_segments(segment, as_of, n_saved=1_000):
+    blocks = segment.sort(  # this segment is generally like 5m rows
+        by=pl.col("block_number")
+    )  # we avoid a second sort here
+
+    prev_blocks = blocks.filter(pl.col("block_number") <= as_of).tail(n_saved)
+    next_blocks = blocks.filter(pl.col("block_number") >= as_of).head(n_saved)
+
+    del blocks  # remove this huge dataset asap
+
+    # we need to cut off the last block of both segements
+    # because we are not sure if we actually pulled all of
+    # that block (since we arent sorting based on tx_index
+    # since its an added sort) this is bc we want to sort
+    # the entire dataframe twice after we truncate
+    min_block = prev_blocks.select(pl.col("block_number").min())
+    prev_blocks = prev_blocks.filter(pl.col("block_number") > min_block).sort(
+        "block_number", "transaction_index", descending=[False, False]
+    )
+
+    max_block = next_blocks.select(pl.col("block_number").max())
+    next_blocks = next_blocks.filter(pl.col("block_number") < max_block).sort(
+        "block_number", "transaction_index", descending=[False, False]
+    )
+
+    return prev_blocks, next_blocks
+
+
+def initialize_blocks(pool, as_of):
+    # TODO
+    # this means that we are not optimizing code
+    # do this better lol
+    if pool.cache["swaps"].is_empty():
+        return
+
+    segment = pl.concat(
+        [
+            (
+                pool.cache["swaps"]
+                .select([pl.col("block_number"), pl.col("transaction_index")])
+                .with_columns(type_of_int=pl.lit("swap"))
+            ),
+            (
+                pool.cache["mb"]
+                .select([pl.col("block_number"), pl.col("transaction_index")])
+                .with_columns(type_of_int=pl.lit("mb"))
+            ),
+        ]
+    )
+
+    prev_blocks, next_blocks = pull_block_segments(segment, as_of)
+
+    # TODO
+    # utilize this list to optimally figure out how to apply deltas
+    pool.slot0["next_blocks"] = next_blocks
+    pool.slot0["prev_blocks"] = prev_blocks
+
+    pool.slot0["next_block"] = next_blocks.head(1)
+    pool.slot0["prev_block"] = prev_blocks.tail(1)
+
+    pool.slot0["initialized"] = True
+
+
+def createValidAsOf(as_of, pool):
+    # TODO
+    # this means that we are not optimizing code
+    # do this better lol
+    if pool.cache["swaps"].is_empty():
+        return
+
+    segment = pl.concat(
+        [
+            (
+                pool.cache["swaps"]
+                .select([pl.col("block_number"), pl.col("transaction_index")])
+                .with_columns(type_of_int=pl.lit("swap"))
+            ),
+            (
+                pool.cache["mb"]
+                .select([pl.col("block_number"), pl.col("transaction_index")])
+                .with_columns(type_of_int=pl.lit("mb"))
+            ),
+        ]
+    )
+
+    prev_blocks, next_blocks = pull_block_segments(segment, as_of)
+
+    # TODO
+    # utilize these list to optimally figure out how to apply deltas
+    # instead of recalcing everything (which is v expensive)
+    # this is mostly a liquidity optimization
+    pool.slot0["next_blocks"] = next_blocks
+    pool.slot0["prev_blocks"] = prev_blocks
+
+    pool.slot0["next_block"] = next_blocks.head(1)
+    pool.slot0["prev_block"] = prev_blocks.tail(1)
+
+    pool.slot0["initialized"] = True
+
+
+def createSwapDF(as_of, pool, givenPrice = 0, rotateValid=False):
     """
     This creates the swap data from that pre-computes most of the values
     needed to simulate a swap
@@ -71,11 +180,18 @@ def createSwapDF(as_of, pool):
     it then pre-computes the amounts needed to escape out of the current
     range as well
     """
-    price = pool.getPriceAt(as_of)
+    price = pool.getPriceAt(as_of) if givenPrice == 0 else givenPrice
     assert price != None, "Pool not initialized"
 
     tickFloor = priceX96ToTickFloor(price, pool.ts)
-    liq = createLiq(as_of, pool, "pool_mint_burn_events", pool.data_path)
+
+    # we've calculated that the lp distribution is the same
+    # so we can instead check the new price and go from there
+    if rotateValid:
+        liq = pool.slot0["liquidity"]
+    else:
+        liq = createLiq(as_of, pool, "pool_mint_burn_events", pool.data_path)
+        pool.slot0["liquidity"] = liq
 
     swap_df = (
         liq.filter(pl.col("liquidity") > 0)  # numerical error
@@ -116,6 +232,9 @@ def createSwapDF(as_of, pool):
     inRange1 = get_amount1_delta(p_b, sqrt_P, liquidity)
     inRangeToSwap1 = get_amount0_delta(p_b, sqrt_P, liquidity)
 
+    # fill slot0
+    createValidAsOf(as_of, pool)
+
     return (
         as_of,
         swap_df,
@@ -131,14 +250,23 @@ def createSwapDF(as_of, pool):
     )
 
 
-def getPriceSeries(pool, start_time, frequency, gas=False):
+def getPriceSeries(pool, start_time, end_time, frequency, gas=False):
     # precompute a dataframe that has the latest block number
+    
+    # TODO
+    # we dont want to always provide an ending time
+    # do this in a better way
+    if end_time == None:
+        end_filter = True
+    else:
+        end_filter = pl.col("block_timestamp") <= end_time.replace(tzinfo=timezone.utc)
+    
     bn_as_of = (
         pl.scan_parquet(f"{pool.data_path}/pool_swap_events/*.parquet")
         .filter(
             (pl.col("chain_name") == pool.chain)
             & (pl.col("block_timestamp") >= start_time.replace(tzinfo=timezone.utc))
-        )
+            & (end_filter))
         .select(["block_timestamp", "block_number"])
         .unique()
         .sort("block_timestamp")
@@ -157,7 +285,7 @@ def getPriceSeries(pool, start_time, frequency, gas=False):
                 (pl.col("chain_name") == pool.chain)
                 & (pl.col("address") == pool.pool)
                 & (pl.col("block_timestamp") >= start_time.replace(tzinfo=timezone.utc))
-            )
+                & (end_filter))
             .select(["block_timestamp", "tick", "gas_price", "gas_used"])
             .unique()
             .sort("block_timestamp")
@@ -187,7 +315,7 @@ def getPriceSeries(pool, start_time, frequency, gas=False):
                 (pl.col("chain_name") == pool.chain)
                 & (pl.col("address") == pool.pool)
                 & (pl.col("block_timestamp") >= start_time.replace(tzinfo=timezone.utc))
-            )
+                & (end_filter))
             .select(["block_timestamp", "tick"])
             .unique()
             .sort("block_timestamp")

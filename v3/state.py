@@ -44,9 +44,20 @@ class v3Pool:
         # remove checksums
         self.pool = pool.lower()
 
+        # state where simulations are cached
+        self.slot0 = {
+            "initialized": False,
+            "next_blocks": pl.DataFrame(),
+            "prev_blocks": pl.DataFrame(),
+            "next_block": pl.DataFrame(),
+            "prev_block": pl.DataFrame(),
+            "liquidity": pl.DataFrame(),
+            "as_of": -1,
+        }
+
         # this is the cache where we store data if needed
+        # this is used to move disk -> memory -> optimized memory
         self.cache = {}
-        self.cache["as_of"] = 0
 
         # data checkers
         self.path = str(Path(f"{PACKAGEDIR}/data").resolve())
@@ -133,7 +144,11 @@ class v3Pool:
                         & (pl.col("chain_name") == self.chain)
                     )
                     .with_columns(
-                        as_of=pl.col("block_number") + pl.col("transaction_index") / 1e4
+                        # TODO
+                        # will overflow if block has more than 10k txs
+                        # need to think of a better way lol
+                        as_of=pl.col("block_number")
+                        + pl.col("transaction_index") / 1e4
                     )
                     .collect()
                     .sort("as_of")
@@ -173,7 +188,7 @@ class v3Pool:
 
                 return df
 
-    def calcSwapDF(self, as_of):
+    def calcSwapDF(self, as_of, force = False):
         """
         @inherit from pool_helpers.createSwapDF
         Helper function that calculates and caches swapDFs
@@ -182,13 +197,66 @@ class v3Pool:
 
         Notice: as_of is the block + transaction index / 1e4.
         Notice: Returns the value before the transaction at that index was done
+        Notice: we attempt to optimistically shift state if possible, but you can 
+                instead force the code to recalculate
         """
-        if self.cache["as_of"] == as_of:
-            return self.cache["swapDF"], self.cache["inRangeValues"]
+        # this is initalized after first swap run
+        rotationValid = False
+        if self.slot0["initialized"]:
+            next_block = slot0ToAsOf(self.slot0["next_block"])
+            prev_block = slot0ToAsOf(self.slot0["prev_block"])
 
-        as_of, df, inRangeValues = createSwapDF(as_of, self)
+            # state is still valid and we can just rotate as_of
+            # NOTE: we replace the tx at as_of with our tx
+            # thus if txs would be equal to as_of, then we replace them
+            # which is why we equal here
+            if ((prev_block <= as_of) and 
+                (as_of <= next_block) and 
+                (not force)):
 
-        self.cache["as_of"] = as_of
+                self.slot0["as_of"] = as_of
+                return self.cache["swapDF"], self.cache["inRangeValues"]
+            
+            # TODO instead of recalculating liquidty from scratch, we can calculate
+            # based off a range and apply the deltas to the liquidity distributions
+            else:
+                if force:
+                    # rotationValid = False
+                    # this should already be False so noop
+                    pass
+
+                elif as_of > next_block:
+                    entry = (
+                        self.slot0["next_blocks"]
+                        .filter(pl.col("type_of_int") != "swap")
+                        .head(1)
+                    )
+                    # we may not have pulled the entry
+                    if entry.is_empty():
+                        # since there are no mbs, we know up until
+                        # the last of prev blocks is valid
+                        entry = self.slot0["prev_blocks"].tail(1)
+                    nextMB = slot0ToAsOf(entry)
+                    if nextMB > as_of:
+                        rotationValid = True
+
+                elif as_of < prev_block:
+                    entry = (
+                        self.slot0["prev_blocks"]
+                        .filter(pl.col("type_of_int") != "swap")
+                        .head(1)
+                    )
+
+                    if entry.is_empty():
+                        entry = self.slot0["prev_blocks"].tail(1)
+
+                    nextMB = slot0ToAsOf(entry)
+                    if nextMB < as_of:
+                        rotationValid = True
+                
+        as_of, df, inRangeValues = createSwapDF(as_of, self, rotationValid)
+
+        self.slot0["as_of"] = as_of
         self.cache["swapDF"] = df
         self.cache["inRangeValues"] = inRangeValues
 
@@ -241,9 +309,9 @@ class v3Pool:
             assert not revert_on_uninitialized, "Price is not initialized"
             return None
         else:
-            return int(price.item())
+            return int(price)
 
-    def getPriceSeries(self, as_of, frequency="6h", gas=False):
+    def getPriceSeries(self, as_of, ending=None, frequency="6h", gas=False):
         """
         @inhert from pool_helpers.getPriceSeries
         Create a price series resampled to the desired frequency
@@ -251,7 +319,8 @@ class v3Pool:
 
         Notice: as_of is the block + transaction index / 1e4.
         """
-        px = getPriceSeries(self, as_of, frequency, gas)
+
+        px = getPriceSeries(self, as_of, ending, frequency, gas)
 
         return px
 
