@@ -151,3 +151,16 @@ def get_next_sqrtPrice(ratioA, liq, amount, zeroForOne):
         sqrtPrice_next = get_next_price_amount1(ratioA, liq, amount, zeroForOne)
 
     return sqrtPrice_next
+
+def addPrice(
+        data: pl.DataFrame
+) -> pl.DataFrame:
+    """
+    Helper function to add a new column with sqrtPriceX96 converted to price
+    """
+    sqrtPrice_list = data.select(pl.col("sqrtPriceX96")).to_series().to_list()
+    price_list = [(int(i)/(2 ** 96))**2 for i in sqrtPrice_list]
+    
+    df = data.with_columns(price = pl.Series(values=price_list, dtype=pl.UInt64))
+
+    return df
