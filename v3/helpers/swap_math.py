@@ -65,7 +65,7 @@ def createLiq(bn, pool, data, data_path):
         .with_columns(liquidity=(pl.col("liquidity_lower") + pl.col("liquidity_upper")))
         .sort(pl.col("tick"))
         .select(["tick", "liquidity"])
-        .with_columns(liquidity=(pl.col("liquidity").cumsum()))
+        .with_columns(liquidity=(pl.col("liquidity").cum_sum()))
     )
 
     return liquidity_distribution
