@@ -152,8 +152,8 @@ def swapIn(calldata, pool, warn=True):
             )
             .sort(pl.col("tick_a"), descending=zeroForOne)
             .with_columns(
-                cumulativeX=pl.col("xInTick").cumsum(),
-                cumulativeY=pl.col("yInTick").cumsum(),
+                cumulativeX=pl.col("xInTick").cum_sum(),
+                cumulativeY=pl.col("yInTick").cum_sum(),
             )
         )
 
