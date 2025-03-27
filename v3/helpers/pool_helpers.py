@@ -26,7 +26,7 @@ def initializePoolFromFactory(addr, chain, data_path):
     assert not factory.shape[0] > 1, "Multiple pools at that address"
 
     ts = int(factory["tickSpacing"].item())
-    fee = int(factory["fee"].item())
+    fee = int(float(factory["fee"].item()))
 
     token0 = factory["token0"].item()
     token1 = factory["token1"].item()
@@ -60,7 +60,7 @@ def dtToBN(dt, pool):
     return bn_as_of
 
 
-def createSwapDF(as_of, pool):
+def createSwapDF(as_of, pool, provided = 0):
     """
     This creates the swap data from that pre-computes most of the values
     needed to simulate a swap
@@ -71,8 +71,11 @@ def createSwapDF(as_of, pool):
     it then pre-computes the amounts needed to escape out of the current
     range as well
     """
-    price = pool.getPriceAt(as_of)
-    assert price != None, "Pool not initialized"
+    if provided == 0:
+        price = pool.getPriceAt(as_of)
+        assert price != None, "Pool not initialized"
+    else:
+        price = provided
 
     tickFloor = priceX96ToTickFloor(price, pool.ts)
     liq = createLiq(as_of, pool, "pool_mint_burn_events", pool.data_path)
