@@ -103,6 +103,28 @@ def finalAmtOutFromTick(
     return amtOutTick, sqrtP_next
 
 
+def finalAmtInFromTick(
+    zeroForOne, sqrt_P_last_top, sqrt_P_last_bottom, amtOutToSwapLeft, liquidity
+):
+    """
+    See https://github.com/Uniswap/v3-core/blob/main/contracts/libraries/SwapMath.sol
+    Specficially computeSwapStep()
+    """
+    if zeroForOne: # token 0 in token 1 out; price goes down
+        sqrtP_next = get_next_price_amount1(
+            sqrt_P_last_top, liquidity, amtOutToSwapLeft, zeroForOne
+        )
+        amtInTick = get_amount0_delta(sqrtP_next, sqrt_P_last_top, liquidity)
+
+    else: # token 1 in token 0 out; price goes up
+        sqrtP_next = get_next_price_amount0(
+            sqrt_P_last_bottom, liquidity, amtOutToSwapLeft, zeroForOne
+        )
+        amtInTick = get_amount1_delta(sqrt_P_last_bottom, sqrtP_next, liquidity)
+
+    return amtInTick, sqrtP_next
+
+
 def get_amount0_delta(ratioA, ratioB, liq):
     """
     See https://github.com/Uniswap/v3-core/blob/main/contracts/libraries/SqrtPriceMath.sol
