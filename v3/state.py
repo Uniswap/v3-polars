@@ -298,6 +298,14 @@ class v3Pool:
 
         return swapIn(calldata, self)
 
+    def swapOut(self, calldata):
+        """
+        @inherit from swap.swapOut
+        Simulates a swap using the given "calldata"
+        """
+
+        return swapOut(calldata, self)
+
     @property
     def swaps(self):
         """

@@ -14,10 +14,9 @@ def parseEntry(calldata, field, default=False, required=True):
 
     return entry
 
-
-def parseCalldata(calldata):
+def parseCalldata_SwapIn(calldata):
     """
-    Parse the calldata to get the entires that we care about
+    Parse the calldata to get the entires that need for SwapIn function
     """
     as_of = parseEntry(calldata, "as_of")
     tokenIn = parseEntry(calldata, "tokenIn")
@@ -27,6 +26,17 @@ def parseCalldata(calldata):
 
     return (as_of, tokenIn, swapIn, findMax, fees)
 
+def parseCalldata_SwapOut(calldata):
+    """
+    Parse the calldata to get the entires that need for SwapOut function
+    """
+    as_of = parseEntry(calldata, "as_of")
+    tokenOut = parseEntry(calldata, "tokenOut")
+    swapOut = parseEntry(calldata, "swapOut")
+    findMax = parseEntry(calldata, "findMax", required=False)
+    fees = parseEntry(calldata, "fees", required=False)
+
+    return (as_of, tokenOut, swapOut, findMax, fees)
 
 def inRangeTesting(zeroForOne, inRange0, inRangeToSwap0, inRange1, inRangeToSwap1):
     # is there enough liquidity in the current tick?
@@ -50,7 +60,7 @@ def swapIn(calldata, pool, warn=True):
 
     amtIn, _ = swapIn(calldata, pool)
     """
-    (as_of, tokenIn, swapIn, findMax, fees) = parseCalldata(calldata)
+    (as_of, tokenIn, swapIn, findMax, fees) = parseCalldata_SwapIn(calldata)
 
     # there can be a desync between mints/burns and swap pulls
     # which causes incorrect data
@@ -131,13 +141,13 @@ def swapIn(calldata, pool, warn=True):
         however here, we vectorize precompute every single tick possible to move over and then find the tick
         cumulatively that has enough for us to swap into
         """
-        leftToSwap = swapIn - inRangeTest
-        leftToSwapMinusFee = leftToSwap * (1 - pool.fee / 1e6)
+        leftToSwapMinusFee = swapInMinusFee - inRangeTest
+        leftToSwap = leftToSwapMinusFee / (1 - pool.fee / 1e6)
 
         # calculate the current in-range liquidity
         if fees:
             feeDict[tick_in_range] = (
-                inRangeTest * (pool.fee / 1e6),
+                (inRangeTest / (1 - pool.fee / 1e6)) * (pool.fee / 1e6),
                 liquidity_in_range,
             )
 
@@ -152,8 +162,8 @@ def swapIn(calldata, pool, warn=True):
             )
             .sort(pl.col("tick_a"), descending=zeroForOne)
             .with_columns(
-                cumulativeX=pl.col("xInTick").cumsum(),
-                cumulativeY=pl.col("yInTick").cumsum(),
+                cumulativeX=pl.col("xInTick").cum_sum(),
+                cumulativeY=pl.col("yInTick").cum_sum(),
             )
         )
 
@@ -186,15 +196,17 @@ def swapIn(calldata, pool, warn=True):
         amtInToSwapLeft = leftToSwap - previousTicks[f"{assetIn}InTick"].sum()
 
         # fee support goes here
-        amtInSwappedLeftMinusFee = amtInToSwapLeft * (1 - pool.fee / 1e6)
+        amtInSwappedLeftMinusFee = leftToSwapMinusFee - previousTicks[f"{assetIn}InTick"].sum() # not include fee
+        amtInToSwapLeft = amtInSwappedLeftMinusFee / (1 - pool.fee / 1e6)
+        
         amtOutPrevTicks = inRangeToSwap + previousTicks[f"{assetOut}InTick"].sum()
-
+        
         if fees:
             # calculate the previous ticks
             for tickValue, liquidityInTick, assetInAmts in previousTicks.select(
                 ["tick_a", "liquidity", f"{assetIn}InTick"]
             ).iter_rows():
-                feeDict[tickValue] = (assetInAmts * (pool.fee / 1e6), liquidityInTick)
+                feeDict[tickValue] = ((assetInAmts / (1 - pool.fee / 1e6)) * (pool.fee / 1e6), liquidityInTick)
 
             # calculate the last tick
             feeDict[liquidTick] = (amtInToSwapLeft * (pool.fee / 1e6), liquidity)
@@ -210,3 +222,134 @@ def swapIn(calldata, pool, warn=True):
         amtOut = amtOutLastTick + amtOutPrevTicks
 
     return amtOut, (sqrtPriceLast, sqrt_P, feeDict)
+
+def swapOut(calldata, pool, warn=True):
+    (as_of, tokenOut, amtOut, findMax, fees) = parseCalldata_SwapOut(calldata)
+    
+    if warn:
+        if pool.max_supported < as_of:
+            print("Mint/burn and swap data are not updated at this date")
+    
+    if isinstance(amtOut, str):
+        amtOut = float(amtOut)
+
+    assert amtOut != 0, "We do not support swaps of 0"
+    
+    if as_of != pool.cache["as_of"]:
+        pool.calcSwapDF(as_of)
+
+    swap_df, inRangeValues = pool.cache["swapDF"], pool.cache["inRangeValues"]
+    
+    zeroForOne = True
+    assetIn, assetOut = "x", "y"
+    
+    feeDict = {}
+    if tokenOut.lower() == pool.token0.lower():
+        zeroForOne = False
+        assetIn, assetOut = "y", "x"
+
+    (
+        sqrt_P,
+        inRange0,  
+        inRangeToSwap0,  
+        inRange1,  
+        inRangeToSwap1,  
+        liquidity_in_range, 
+        tick_in_range,
+    ) = inRangeValues # not include fee
+
+    inRangeTest, inRangeToSwap = inRangeTesting(
+        zeroForOne, inRange0, inRangeToSwap0, inRange1, inRangeToSwap1
+    )
+
+    if findMax:
+        amtOut = inRangeToSwap
+
+    if inRangeToSwap > amtOut:
+        # enough liquidity in range
+        liquidity = liquidity_in_range
+
+        if zeroForOne: 
+            sqrtPriceLast = get_next_price_amount1(
+                sqrt_P, liquidity, amtOut, zeroForOne
+            ) 
+            inputMinusFee = get_amount0_delta(sqrtPriceLast, sqrt_P, liquidity)
+        else: 
+            sqrtPriceLast = get_next_price_amount0(
+                sqrt_P, liquidity, amtOut, zeroForOne 
+            ) 
+            inputMinusFee = get_amount1_delta(sqrt_P, sqrtPriceLast, liquidity) 
+        
+        amtIn = inputMinusFee / (1 - pool.fee / 1e6)   #include fee
+        if fees:
+            feeDict[tick_in_range] = (amtIn * (pool.fee / 1e6), liquidity)
+    else:
+        remaining_amtOut = amtOut - inRangeToSwap 
+
+        if fees:
+            feeDict[tick_in_range] = (
+                (inRangeTest / (1 - pool.fee / 1e6)) * (pool.fee / 1e6),
+                liquidity_in_range
+            )
+        
+        oor = (
+            swap_df.filter(
+                (
+                    pl.col("tick_a") < tick_in_range 
+                    if zeroForOne #price down
+                    else pl.col("tick_a") > tick_in_range #price up
+                )
+            )
+            .sort(pl.col("tick_a"), descending=zeroForOne)
+            .with_columns(
+                cumulativeX = pl.col("xInTick").cum_sum(), 
+                cumulativeY = pl.col("yInTick").cum_sum(), 
+            )
+        )
+
+        assetColumn = pl.col("cumulativeY") if zeroForOne else pl.col("cumulativeX")
+        
+        maxAmountIn = oor.select(assetColumn).max().item()
+        assert maxAmountIn > remaining_amtOut, "Not enough liquidity in pool"
+
+        liquidTickRow = oor.filter(assetColumn >= remaining_amtOut).head(1)
+        liquidTick = liquidTickRow["tick_a"].item()
+
+        previousTicks = oor.filter(
+            pl.col("tick_a") > liquidTick
+            if zeroForOne
+            else pl.col("tick_a") < liquidTick
+        )
+
+        sqrt_P_last_top, sqrt_P_last_bottom = (
+            liquidTickRow["p_b"].item(),
+            liquidTickRow["p_a"].item(),
+        )
+        liquidity = liquidTickRow["liquidity"].item()
+
+        amtOutToSwapLeft = remaining_amtOut - previousTicks[f"{assetOut}InTick"].sum() 
+        
+        amtInLastTickMinusFee, sqrtPriceLast = finalAmtInFromTick(
+            zeroForOne,
+            sqrt_P_last_top,
+            sqrt_P_last_bottom,
+            amtOutToSwapLeft,
+            liquidity,
+        ) 
+
+        # fee support goes here
+        amtInPrevTicksMinusFee = inRangeTest + previousTicks[f"{assetIn}InTick"].sum()
+        amtInMinusFee = amtInLastTickMinusFee + amtInPrevTicksMinusFee # exclude fee
+        amtIn = amtInMinusFee / (1 - pool.fee / 1e6)
+
+        if fees:
+            # the previous ticks
+            for tickValue, liquidityInTick, assetInAmts in previousTicks.select(
+                ["tick_a", "liquidity", f"{assetIn}InTick"]
+            ).iter_rows():
+                feeDict[tickValue] = ((assetInAmts / (1 - pool.fee / 1e6)) * (pool.fee / 1e6), liquidityInTick)
+
+            # the last tick 
+            feeDict[liquidTick] = ((amtInLastTickMinusFee / (1 - pool.fee / 1e6)) * (pool.fee / 1e6), liquidity)
+        
+    return amtIn, (sqrtPriceLast, sqrt_P, feeDict)
